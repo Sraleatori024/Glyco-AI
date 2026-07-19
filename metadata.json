@@ -1,0 +1,6 @@
+{
+  "name": "Glyco AI",
+  "description": "SaaS de Gerenciamento Inteligente para Diabetes com análise nutricional de refeições e assistente inteligente.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

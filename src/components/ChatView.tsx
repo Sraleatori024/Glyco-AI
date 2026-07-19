@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { Message, UserProfile } from "../types";
-import { Send, Sparkles, User, Brain, AlertTriangle, RefreshCw } from "lucide-react";
+import { Send, Sparkles, User, Brain, AlertTriangle, RefreshCw, Lock } from "lucide-react";
 
 interface ChatViewProps {
   messages: Message[];
@@ -11,6 +11,8 @@ interface ChatViewProps {
     averageGlucose: number;
     timeInRange: number;
   };
+  isPremium: boolean;
+  onNavigateToSubscription?: () => void;
 }
 
 const CHAT_PRESETS = [
@@ -26,10 +28,15 @@ export default function ChatView({
   onReceiveAssistantMessage,
   profile,
   currentStats,
+  isPremium,
+  onNavigateToSubscription,
 }: ChatViewProps) {
   const [inputText, setInputText] = useState("");
   const [loading, setLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const userMessagesCount = messages.filter((m) => m.sender === "user").length;
+  const isChatLimitReached = !isPremium && userMessagesCount >= 4;
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -41,6 +48,11 @@ export default function ChatView({
 
   const handleSend = async (textToSend: string) => {
     if (!textToSend.trim()) return;
+
+    if (isChatLimitReached) {
+      alert("Limite de chat gratuito atingido. Assine o plano Premium para conversas ilimitadas.");
+      return;
+    }
 
     onSendMessage(textToSend);
     setInputText("");
@@ -175,29 +187,49 @@ export default function ChatView({
 
         {/* Input box */}
         <div className="p-4 border-t border-neutral-100 bg-neutral-50">
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              handleSend(inputText);
-            }}
-            className="flex gap-2"
-          >
-            <input
-              type="text"
-              className="flex-1 px-4 py-3 border border-neutral-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
-              placeholder="Pergunte sobre alimentos, sintomas ou dicas de medicação..."
-              value={inputText}
-              onChange={(e) => setInputText(e.target.value)}
-              disabled={loading}
-            />
-            <button
-              type="submit"
-              disabled={loading || !inputText.trim()}
-              className="px-4 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl shadow-xs hover:shadow-md transition-all disabled:opacity-50 flex items-center justify-center cursor-pointer"
+          {isChatLimitReached ? (
+            <div className="bg-neutral-900 border border-neutral-800 text-white rounded-2xl p-5 text-center space-y-3 shadow-md relative overflow-hidden">
+              <div className="flex items-center justify-center gap-2 text-amber-400">
+                <Lock className="w-4 h-4" />
+                <span className="text-xs font-black uppercase tracking-wider">Limite do Assistente IA Atingido</span>
+              </div>
+              <p className="text-[11px] text-neutral-400 max-w-md mx-auto leading-relaxed">
+                Você enviou {userMessagesCount} mensagens gratuitas. Assine o **Plano Premium** para continuar tirando dúvidas sobre nutrição, receitas e comportamento glicêmico sem restrições.
+              </p>
+              <button
+                type="button"
+                onClick={onNavigateToSubscription}
+                className="bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-bold px-4 py-2 rounded-lg transition-all shadow-md cursor-pointer inline-flex items-center gap-1"
+              >
+                <Sparkles className="w-3 h-3" />
+                Liberar Chat Ilimitado (R$ 29,90)
+              </button>
+            </div>
+          ) : (
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                handleSend(inputText);
+              }}
+              className="flex gap-2"
             >
-              <Send className="w-4 h-4" />
-            </button>
-          </form>
+              <input
+                type="text"
+                className="flex-1 px-4 py-3 border border-neutral-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                placeholder="Pergunte sobre alimentos, sintomas ou dicas de medicação..."
+                value={inputText}
+                onChange={(e) => setInputText(e.target.value)}
+                disabled={loading}
+              />
+              <button
+                type="submit"
+                disabled={loading || !inputText.trim()}
+                className="px-4 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl shadow-xs hover:shadow-md transition-all disabled:opacity-50 flex items-center justify-center cursor-pointer"
+              >
+                <Send className="w-4 h-4" />
+              </button>
+            </form>
+          )}
         </div>
       </div>
     </div>

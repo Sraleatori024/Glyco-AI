@@ -29,8 +29,10 @@ export default function GlicemiaView({
   const [type, setType] = useState<GlucoseLog["type"]>("jejum");
   const [notes, setNotes] = useState<string>("");
 
-  // Filter State
+  // Filter States
   const [filterType, setFilterType] = useState<GlucoseLog["type"] | "all">("all");
+  const [timeRange, setTimeRange] = useState<"all" | "today" | "7days" | "30days" | "90days" | "6months" | "1year">("all");
+  const [searchTerm, setSearchTerm] = useState("");
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -48,7 +50,6 @@ export default function GlicemiaView({
 
     // Reset some fields
     setNotes("");
-    // Give some success visual signal or keep the user informed.
   };
 
   // Helper: check range
@@ -80,16 +81,56 @@ export default function GlicemiaView({
     }
   };
 
+  // Filter logs by type, timeRange, and search term
+  const getFilteredLogs = () => {
+    const now = new Date();
+    
+    return logs.filter((log) => {
+      // 1. Filter by moment type
+      if (filterType !== "all" && log.type !== filterType) {
+        return false;
+      }
+
+      // 2. Filter by search term (notes)
+      if (searchTerm.trim() && !log.notes?.toLowerCase().includes(searchTerm.toLowerCase())) {
+        return false;
+      }
+
+      // 3. Filter by time range
+      const logDate = new Date(log.timestamp);
+      const diffTime = Math.abs(now.getTime() - logDate.getTime());
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+      if (timeRange === "today") {
+        const todayStr = now.toLocaleDateString("pt-BR");
+        const logStr = logDate.toLocaleDateString("pt-BR");
+        if (todayStr !== logStr) return false;
+      } else if (timeRange === "7days" && diffDays > 7) {
+        return false;
+      } else if (timeRange === "30days" && diffDays > 30) {
+        return false;
+      } else if (timeRange === "90days" && diffDays > 90) {
+        return false;
+      } else if (timeRange === "6months" && diffDays > 180) {
+        return false;
+      } else if (timeRange === "1year" && diffDays > 365) {
+        return false;
+      }
+
+      return true;
+    });
+  };
+
+  const filteredLogsList = getFilteredLogs();
+
   // Group logs by day
   const getGroupedLogs = () => {
-    const sorted = [...logs].sort(
+    const sorted = [...filteredLogsList].sort(
       (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
     );
 
-    const filtered = filterType === "all" ? sorted : sorted.filter((l) => l.type === filterType);
-
     const groups: { [key: string]: GlucoseLog[] } = {};
-    filtered.forEach((log) => {
+    sorted.forEach((log) => {
       const d = new Date(log.timestamp).toLocaleDateString("pt-BR", {
         weekday: "long",
         day: "numeric",
@@ -106,10 +147,10 @@ export default function GlicemiaView({
 
   const groupedLogs = getGroupedLogs();
 
-  // Statistics summaries
-  const totalLogs = logs.length;
-  const hypoglicemias = logs.filter((l) => l.value < targetMin).length;
-  const inRangeLogs = logs.filter((log) => {
+  // Statistics summaries based on filtered logs
+  const totalLogs = filteredLogsList.length;
+  const hypoglicemias = filteredLogsList.filter((l) => l.value < targetMin).length;
+  const inRangeLogs = filteredLogsList.filter((log) => {
     const isJejum = log.type === "jejum" || log.type === "antes_dormir";
     const max = isJejum ? targetMaxJejum : targetMaxPos;
     return log.value >= targetMin && log.value <= max;
@@ -276,24 +317,61 @@ export default function GlicemiaView({
       {/* Right panel: Historical journal timeline with filters */}
       <div className="lg:col-span-2 space-y-6">
         <div className="bg-white p-6 rounded-3xl border border-neutral-100 shadow-2xs">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
-            <div>
-              <h3 className="text-lg font-bold text-neutral-900">Diário de Glicemias</h3>
-              <p className="text-xs text-neutral-500">Histórico cronológico detalhado com filtros de período.</p>
+          <div className="space-y-4 mb-6">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+              <div>
+                <h3 className="text-lg font-bold text-neutral-900">Diário de Glicemias</h3>
+                <p className="text-xs text-neutral-500">Histórico cronológico detalhado com filtros de período.</p>
+              </div>
             </div>
-            <div className="flex items-center gap-1.5 self-start sm:self-auto">
-              <Filter className="w-4 h-4 text-neutral-400 shrink-0" />
-              <select
-                className="px-3 py-1.5 bg-neutral-50 border border-neutral-200 rounded-lg text-xs font-semibold focus:outline-none"
-                value={filterType}
-                onChange={(e) => setFilterType(e.target.value as any)}
-              >
-                <option value="all">Todas as medições</option>
-                <option value="jejum">Apenas Jejum</option>
-                <option value="pre_refeicao">Pré-Refeição</option>
-                <option value="pos_refeicao">Pós-Refeição</option>
-                <option value="antes_dormir">Antes de Dormir</option>
-              </select>
+
+            {/* Advanced Filters Block */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-neutral-50 p-4 rounded-2xl border border-neutral-150">
+              {/* Search */}
+              <div className="space-y-1">
+                <label className="block text-[10px] font-bold text-neutral-500 uppercase tracking-wider">Buscar por observações</label>
+                <input
+                  type="text"
+                  placeholder="Pesquisar..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="w-full px-3 py-1.5 bg-white border border-neutral-200 rounded-lg text-xs focus:outline-none"
+                />
+              </div>
+
+              {/* Time Range Filter */}
+              <div className="space-y-1">
+                <label className="block text-[10px] font-bold text-neutral-500 uppercase tracking-wider">Período de Tempo</label>
+                <select
+                  value={timeRange}
+                  onChange={(e) => setTimeRange(e.target.value as any)}
+                  className="w-full px-3 py-1.5 bg-white border border-neutral-200 rounded-lg text-xs font-semibold focus:outline-none"
+                >
+                  <option value="all">Todo o Histórico</option>
+                  <option value="today">Hoje</option>
+                  <option value="7days">Últimos 7 dias</option>
+                  <option value="30days">Últimos 30 dias</option>
+                  <option value="90days">Últimos 90 dias</option>
+                  <option value="6months">Últimos 6 meses</option>
+                  <option value="1year">Último ano</option>
+                </select>
+              </div>
+
+              {/* Moment Type Filter */}
+              <div className="space-y-1">
+                <label className="block text-[10px] font-bold text-neutral-500 uppercase tracking-wider">Momento</label>
+                <select
+                  value={filterType}
+                  onChange={(e) => setFilterType(e.target.value as any)}
+                  className="w-full px-3 py-1.5 bg-white border border-neutral-200 rounded-lg text-xs font-semibold focus:outline-none"
+                >
+                  <option value="all">Todos os Momentos</option>
+                  <option value="jejum">Apenas Jejum</option>
+                  <option value="pre_refeicao">Pré-Refeição</option>
+                  <option value="pos_refeicao">Pós-Refeição</option>
+                  <option value="antes_dormir">Antes de Dormir</option>
+                </select>
+              </div>
             </div>
           </div>
 

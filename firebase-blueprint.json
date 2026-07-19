@@ -1,0 +1,87 @@
+{
+  "collections": {
+    "users": {
+      "description": "User accounts with system settings and subscription status",
+      "schema": {
+        "email": "string",
+        "role": "string",
+        "subscriptionStatus": "string",
+        "subscriptionPlan": "string",
+        "currentPeriodEnd": "string",
+        "isBlocked": "boolean",
+        "createdAt": "string",
+        "updatedAt": "string"
+      },
+      "subcollections": {
+        "profile": {
+          "description": "Health profile of the user",
+          "schema": {
+            "name": "string",
+            "age": "number",
+            "gender": "string",
+            "height": "number",
+            "weight": "number",
+            "diabetesType": "string",
+            "medications": "array",
+            "usesInsulin": "boolean",
+            "insulinTypes": "array",
+            "targetGlucoseMinJejum": "number",
+            "targetGlucoseMaxJejum": "number",
+            "targetGlucoseMaxPosPrandial": "number",
+            "goals": "array"
+          }
+        },
+        "logs": {
+          "description": "Glucose level, food intake, medication intake, exercise session and insulin records",
+          "schema": {
+            "id": "string",
+            "type": "string",
+            "timestamp": "string",
+            "glucoseValue": "number",
+            "glucoseType": "string",
+            "foodDescription": "string",
+            "foodNutrition": "object",
+            "medicationName": "string",
+            "medicationDose": "string",
+            "medicationTimeScheduled": "string",
+            "exerciseType": "string",
+            "exerciseDuration": "number",
+            "exerciseIntensity": "string",
+            "exerciseImpact": "string",
+            "notes": "string"
+          }
+        },
+        "ai_history": {
+          "description": "History of chat messages and assistant suggestions",
+          "schema": {
+            "id": "string",
+            "sender": "string",
+            "text": "string",
+            "timestamp": "string"
+          }
+        },
+        "reports": {
+          "description": "Generated reports metadata",
+          "schema": {
+            "id": "string",
+            "dateStart": "string",
+            "dateEnd": "string",
+            "generatedAt": "string",
+            "summary": "string"
+          }
+        }
+      }
+    },
+    "audit_logs": {
+      "description": "System admin audit trails of sensitive administrative actions",
+      "schema": {
+        "adminId": "string",
+        "adminEmail": "string",
+        "action": "string",
+        "targetUserId": "string",
+        "timestamp": "string",
+        "details": "string"
+      }
+    }
+  }
+}

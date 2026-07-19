@@ -7,14 +7,23 @@ interface AlimentacaoViewProps {
   logs: FoodLog[];
   onAddLog: (log: Omit<FoodLog, "id">) => void;
   profile: UserProfile;
+  isPremium: boolean;
+  onNavigateToSubscription?: () => void;
 }
 
-export default function AlimentacaoView({ logs, onAddLog, profile }: AlimentacaoViewProps) {
+export default function AlimentacaoView({ 
+  logs, 
+  onAddLog, 
+  profile, 
+  isPremium, 
+  onNavigateToSubscription 
+}: AlimentacaoViewProps) {
   const [description, setDescription] = useState("");
   const [base64Image, setBase64Image] = useState<string | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState<FoodNutrition | null>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [showPremiumPrompt, setShowPremiumPrompt] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // File Upload Handlers (Drag and Drop & Browse)
@@ -55,6 +64,11 @@ export default function AlimentacaoView({ logs, onAddLog, profile }: Alimentacao
 
   // Run the full-stack Gemini analysis
   const handleAnalyze = async () => {
+    if (!isPremium) {
+      setShowPremiumPrompt(true);
+      return;
+    }
+
     if (!description.trim() && !base64Image) {
       alert("Escreva a descrição da refeição ou adicione uma foto.");
       return;
@@ -406,6 +420,53 @@ export default function AlimentacaoView({ logs, onAddLog, profile }: Alimentacao
           )}
         </div>
       </div>
+
+      {/* Premium Prompt Dialog Overlay */}
+      {showPremiumPrompt && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <div className="bg-neutral-900 border border-neutral-800 text-white rounded-3xl p-8 max-w-md w-full text-center space-y-6 shadow-2xl relative">
+            <div className="absolute top-0 inset-x-0 h-[2px] bg-gradient-to-r from-emerald-500 to-blue-500" />
+            <div className="w-14 h-14 rounded-2xl bg-emerald-500/10 flex items-center justify-center mx-auto text-emerald-400">
+              <Sparkles className="w-6 h-6" />
+            </div>
+            <div className="space-y-2">
+              <h3 className="text-lg font-black tracking-tight">Análise Inteligente de Refeições</h3>
+              <p className="text-xs text-neutral-400 leading-relaxed">
+                A leitura nutricional avançada de pratos por fotos ou texto é um recurso exclusivo para assinantes **Premium**. Receba contagem exata de carboidratos, carga glicêmica calculada e dicas personalizadas.
+              </p>
+            </div>
+
+            <div className="bg-neutral-950 p-4 rounded-xl border border-neutral-850 text-left text-xs space-y-2">
+              <div className="flex items-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                <span>Reconhecimento fotográfico instantâneo de pratos</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                <span>Impacto glicêmico estimado com base no seu perfil</span>
+              </div>
+            </div>
+
+            <div className="flex gap-2 justify-stretch pt-2">
+              <button
+                onClick={() => setShowPremiumPrompt(false)}
+                className="flex-1 py-2.5 rounded-xl border border-neutral-800 text-neutral-400 hover:text-white text-xs font-bold transition-all cursor-pointer"
+              >
+                Voltar
+              </button>
+              <button
+                onClick={() => {
+                  setShowPremiumPrompt(false);
+                  if (onNavigateToSubscription) onNavigateToSubscription();
+                }}
+                className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-xl transition-all shadow-md cursor-pointer"
+              >
+                Assinar Premium
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

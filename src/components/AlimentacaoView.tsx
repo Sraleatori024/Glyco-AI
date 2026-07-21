@@ -94,7 +94,25 @@ export default function AlimentacaoView({
       });
 
       if (!response.ok) {
-        throw new Error("Não foi possível analisar o alimento no momento.");
+        let errorMsg = "Não foi possível analisar o alimento no momento.";
+        try {
+          const errData = await response.json();
+          errorMsg = errData.message || errData.error || errorMsg;
+          if (errData.statusCode) {
+            errorMsg += ` (Status: ${errData.statusCode})`;
+          }
+          if (errData.elapsedTimeMs) {
+            errorMsg += ` [Tempo: ${errData.elapsedTimeMs}ms]`;
+          }
+        } catch {
+          try {
+            const txt = await response.text();
+            if (txt) {
+              errorMsg += ` - ${txt.substring(0, 150)}`;
+            }
+          } catch (_) {}
+        }
+        throw new Error(errorMsg);
       }
 
       const result = await response.json();

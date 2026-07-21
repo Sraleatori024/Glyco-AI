@@ -347,10 +347,17 @@ Retorne as informações em um formato JSON válido estruturado para renderizaç
 
 // 3. Endpoint for food nutritional analysis (text description or base64 photo estimation)
 app.post("/api/gemini/analyze-food", async (req: any, res: any) => {
+  const startTime = Date.now();
+  let foodDescription = "";
   try {
-    const { foodDescription, base64Image, profile } = req.body;
+    const { foodDescription: desc, base64Image, profile } = req.body || {};
+    foodDescription = desc || "";
+
+    console.log(`\n--- [INÍCIO DA REQUISIÇÃO ANALISADOR DE ALIMENTOS MULTIMODAL] ---`);
+    console.log(`[HORÁRIO]: ${new Date().toISOString()}`);
 
     if (!foodDescription && !base64Image) {
+      console.warn("[AVISO]: Descrição do alimento e imagem estão ausentes.");
       return res.status(400).json({ error: "Forneça uma descrição do alimento ou uma foto." });
     }
 
@@ -371,20 +378,22 @@ Usa Insulina? ${profile?.usesInsulin ? "Sim" : "Não"}
     const systemInstruction = `${systemPrompt}\n\n${userProfileContext}`;
 
     let promptText = "";
-    const contents: any[] = [];
-
-    console.log(`\n--- [DEBUG ANALISADOR DE ALIMENTOS MULTIMODAL] ---`);
-    console.log(`[MODELO UTILIZADO]: gemini-3.5-flash`);
+    const partsList: any[] = [];
 
     if (base64Image) {
       // Robust Base64 Extraction
       const parts = base64Image.split(";base64,");
-      const mimeType = parts[0].split(":")[1] || "image/jpeg";
+      const mimeType = parts[0]?.split(":")[1] || "image/jpeg";
       const cleanBase64 = parts[1];
 
-      console.log(`[DADOS DA IMAGEM]: Imagem recebida no backend. MimeType: "${mimeType}", Comprimento Base64: ${cleanBase64.length}`);
+      if (!cleanBase64) {
+        throw new Error("Dados da imagem inválidos ou formato Base64 incorreto.");
+      }
 
-      contents.push({
+      console.log(`[DADOS DA IMAGEM]: Imagem recebida no backend. MimeType: "${mimeType}", Comprimento Base64: ${cleanBase64.length} caracteres.`);
+      console.log(`[CONFIRMAÇÃO]: A imagem foi decodificada com sucesso no backend.`);
+
+      partsList.push({
         inlineData: {
           mimeType,
           data: cleanBase64
@@ -433,12 +442,19 @@ Preencha todos os campos estruturados em conformidade com a refeição descrita.
 `;
     }
 
-    console.log(`[PROMPT ENVIADO]: ${promptText.trim().substring(0, 300)}...`);
+    console.log(`[PROMPT ENVIADO]:\n${promptText.trim()}\n`);
 
-    contents.push({ text: promptText });
+    partsList.push({ text: promptText });
 
+    // Correct Gemini Content structure wrapping parts in a 'parts' property
+    const requestContents = {
+      parts: partsList
+    };
+
+    console.log(`[CHAVE DE API CONFIGURADA]: ${process.env.GEMINI_API_KEY ? "Sim (Inicia com " + process.env.GEMINI_API_KEY.substring(0, 5) + "...)" : "Não"}`);
+    
     const response = await generateContentWithRetry({
-      contents: contents,
+      contents: requestContents,
       config: {
         systemInstruction: systemInstruction,
         responseMimeType: "application/json",
@@ -476,14 +492,35 @@ Preencha todos os campos estruturados em conformidade com a refeição descrita.
       }
     });
 
+    const duration = Date.now() - startTime;
     const resultText = response.text || "{}";
-    console.log(`[RESPOSTA RETORNADA DO GEMINI]: ${resultText.substring(0, 300)}...`);
-    console.log(`--- [FIM DEBUG ANALISADOR DE ALIMENTOS MULTIMODAL] ---\n`);
+    
+    console.log(`[TEMPO DA REQUISIÇÃO]: ${duration}ms`);
+    console.log(`[RESPOSTA RETORNADA DO GEMINI]:\n${resultText}\n`);
+    console.log(`--- [FIM SUCESSO ANALISADOR DE ALIMENTOS MULTIMODAL] ---\n`);
 
     res.json(JSON.parse(resultText));
   } catch (error: any) {
-    console.error("Erro ao analisar refeição:", error);
-    res.status(500).json({ error: error.message || "Erro interno do servidor ao analisar refeição." });
+    const elapsedTime = Date.now() - startTime;
+    
+    console.error(`\n================= ERRO GRAVE NO ANALISADOR MULTIMODAL =================`);
+    console.error(`[TEMPO ATÉ FALHAR]: ${elapsedTime}ms`);
+    console.error(`[MENSAGEM DE ERRO]: ${error.message || error}`);
+    console.error(`[STATUS HTTP / CÓDIGO]: ${error.status || error.statusCode || 500}`);
+    console.error(`[MODELO CONFIGURADO]: gemini-3.6-flash / gemini-3.5-flash`);
+    console.log(`[CHAVE DE API VÁLIDA?]: ${process.env.GEMINI_API_KEY ? "Sim" : "Não (FALTA CONFIGURAR)"}`);
+    console.error(`[STACK TRACE]:\n${error.stack}\n`);
+    console.error(`========================================================================\n`);
+
+    res.status(500).json({
+      error: "Falha na análise nutricional do Gemini.",
+      message: error.message || String(error),
+      statusCode: error.status || error.statusCode || 500,
+      elapsedTimeMs: elapsedTime,
+      stack: error.stack,
+      promptSent: foodDescription || "Imagem multimodal",
+      modelUsed: "gemini-3.6-flash / gemini-3.5-flash"
+    });
   }
 });
 

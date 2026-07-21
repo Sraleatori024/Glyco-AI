@@ -27,17 +27,78 @@ export default function AlimentacaoView({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
 
+  // Helper to resize and compress image to keep payload lightweight (< 300KB)
+  const resizeAndCompressImage = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const img = window.Image ? new window.Image() : document.createElement("img");
+        img.onload = () => {
+          const canvas = document.createElement("canvas");
+          let width = img.width;
+          let height = img.height;
+          
+          // Set maximum width or height to 1024px to keep it high-quality yet lightweight
+          const MAX_SIZE = 1024;
+          if (width > height) {
+            if (width > MAX_SIZE) {
+              height = Math.round((height * MAX_SIZE) / width);
+              width = MAX_SIZE;
+            }
+          } else {
+            if (height > MAX_SIZE) {
+              width = Math.round((width * MAX_SIZE) / height);
+              height = MAX_SIZE;
+            }
+          }
+          
+          canvas.width = width;
+          canvas.height = height;
+          
+          const ctx = canvas.getContext("2d");
+          if (!ctx) {
+            reject(new Error("Não foi possível criar o contexto do canvas."));
+            return;
+          }
+          
+          ctx.drawImage(img, 0, 0, width, height);
+          
+          // Compress as JPEG with 0.75 quality for maximum performance and compatibility
+          const dataUrl = canvas.toDataURL("image/jpeg", 0.75);
+          resolve(dataUrl);
+        };
+        img.onerror = () => {
+          reject(new Error("Erro ao carregar a imagem para processamento."));
+        };
+        img.src = event.target?.result as string;
+      };
+      reader.onerror = () => {
+        reject(new Error("Erro ao ler o arquivo de imagem."));
+      };
+      reader.readAsDataURL(file);
+    });
+  };
+
   // File Upload Handlers (Drag and Drop & Browse)
-  const processFile = (file: File) => {
+  const processFile = async (file: File) => {
     if (!file.type.startsWith("image/")) {
       alert("Por favor, selecione apenas arquivos de imagem.");
       return;
     }
-    const reader = new FileReader();
-    reader.onload = () => {
-      setBase64Image(reader.result as string);
-    };
-    reader.readAsDataURL(file);
+
+    try {
+      // Compress and resize the image before saving to state
+      const compressedDataUrl = await resizeAndCompressImage(file);
+      setBase64Image(compressedDataUrl);
+    } catch (err: any) {
+      console.error("Erro no redimensionamento/compressão da imagem:", err);
+      // Fallback: use raw reader if compression fails
+      const reader = new FileReader();
+      reader.onload = () => {
+        setBase64Image(reader.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
   };
 
   const handleDragOver = (e: React.DragEvent) => {

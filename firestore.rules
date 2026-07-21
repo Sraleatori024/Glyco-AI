@@ -80,9 +80,17 @@ service cloud.firestore {
     function isValidChatMessage(data) {
       return data.id is string && data.id.size() <= 128 &&
              data.uid is string && data.uid == request.auth.uid &&
-             data.sender is string && (data.sender in ['user', 'assistant']) &&
-             data.text is string && data.text.size() <= 10000 &&
-             data.timestamp is string && data.timestamp.size() <= 100;
+             (
+               (data.sender is string && (data.sender in ['user', 'assistant']) &&
+                data.text is string && data.text.size() <= 10000 &&
+                data.timestamp is string && data.timestamp.size() <= 100)
+               ||
+               (data.pergunta is string && data.pergunta.size() <= 10000 &&
+                data.resposta is string && data.resposta.size() <= 10000 &&
+                data['data'] is string && data['data'].size() <= 30 &&
+                data['horário'] is string && data['horário'].size() <= 30 &&
+                data.timestamp is string && data.timestamp.size() <= 100)
+             );
     }
 
     function isValidAuditLog(data) {

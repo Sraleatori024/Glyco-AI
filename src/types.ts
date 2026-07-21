@@ -40,6 +40,7 @@ export interface FoodNutrition {
   sugar: number; // grams
   fiber: number; // grams
   protein: number; // grams
+  fats: number; // grams
   calories: number; // kcal
   glycemicLoad: number; // score
   glycemicIndexRating: "baixo" | "medio" | "alto";
@@ -145,6 +146,7 @@ export const INITIAL_FOOD_LOGS: FoodLog[] = [
       sugar: 6,
       fiber: 1,
       protein: 12,
+      fats: 9,
       calories: 340,
       glycemicLoad: 28,
       glycemicIndexRating: "alto",
@@ -163,6 +165,7 @@ export const INITIAL_FOOD_LOGS: FoodLog[] = [
       sugar: 2,
       fiber: 8,
       protein: 32,
+      fats: 11,
       calories: 420,
       glycemicLoad: 12,
       glycemicIndexRating: "baixo",

@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { Message, UserProfile } from "../types";
-import { Send, Sparkles, User, Brain, AlertTriangle, RefreshCw, Lock, Dumbbell } from "lucide-react";
+import { Send, Sparkles, User, Brain, AlertTriangle, RefreshCw, Lock, Dumbbell, Copy, Share2, Bookmark } from "lucide-react";
 import { SMART_EXERCISES } from "../data/exercises";
 
 interface ChatViewProps {
@@ -180,6 +180,41 @@ export default function ChatView({
                       : "bg-neutral-50 border-neutral-150 text-neutral-800 rounded-tl-none"
                   }`}>
                     <p className="whitespace-pre-wrap">{cleanMessageText}</p>
+                    
+                    {!isUser && (
+                      <div className="flex items-center gap-3 mt-3 pt-3 border-t border-neutral-200/60 text-xxs text-neutral-500 font-bold">
+                        <button
+                          onClick={() => {
+                            navigator.clipboard.writeText(cleanMessageText);
+                            alert("Mensagem copiada para a área de transferência!");
+                          }}
+                          className="hover:text-blue-600 transition-colors flex items-center gap-1 cursor-pointer"
+                        >
+                          <Copy className="w-3.5 h-3.5" />
+                          Copiar
+                        </button>
+                        <button
+                          onClick={() => {
+                            if (navigator.share) {
+                              navigator.share({
+                                title: "Dicas Glyco AI Assistant",
+                                text: cleanMessageText
+                              }).catch(console.error);
+                            } else {
+                              navigator.clipboard.writeText(cleanMessageText);
+                              alert("Mensagem copiada! Pronto para compartilhar.");
+                            }
+                          }}
+                          className="hover:text-blue-600 transition-colors flex items-center gap-1 cursor-pointer"
+                        >
+                          <Share2 className="w-3.5 h-3.5" />
+                          Compartilhar
+                        </button>
+                        <span className="ml-auto text-[9px] text-emerald-600 font-extrabold flex items-center gap-1 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-100">
+                          <Bookmark className="w-3 h-3 text-emerald-500" /> Salvo
+                        </span>
+                      </div>
+                    )}
                   </div>
 
                   {!isUser && exerciseMatches.map((exerciseId) => {

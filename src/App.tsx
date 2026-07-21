@@ -369,7 +369,28 @@ export default function App() {
     const updated = [...chatMessages, msg];
     saveChat(updated);
     if (user) {
+      // 1. Save standard message for chat feed loading
       await syncDocToFirestore("chat", msg.id, msg);
+
+      // 2. Save paired interaction in the exact required schema to ai_history
+      const lastUserMsg = [...chatMessages].reverse().find(m => m.sender === "user");
+      const questionText = lastUserMsg ? lastUserMsg.text : "Dúvida geral sobre diabetes";
+      
+      const now = new Date();
+      const formattedDate = now.toLocaleDateString("pt-BR");
+      const formattedTime = now.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+
+      const interactionId = "int_" + Math.random().toString(36).substr(2, 9);
+      const interactionData = {
+        id: interactionId,
+        pergunta: questionText,
+        resposta: text,
+        data: formattedDate,
+        horário: formattedTime,
+        timestamp: now.toISOString()
+      };
+
+      await syncDocToFirestore("chat", interactionId, interactionData);
     }
   };
 

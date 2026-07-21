@@ -287,7 +287,7 @@ export default function AlimentacaoView({
                 <h4 className="text-xs font-extrabold text-neutral-800 uppercase tracking-widest border-b border-neutral-300 pb-2 mb-4">
                   Valores Nutricionais Estimados
                 </h4>
-                <div className="grid grid-cols-2 sm:grid-cols-5 gap-4">
+                <div className="grid grid-cols-2 sm:grid-cols-6 gap-4">
                   <div className="space-y-0.5 border-r border-neutral-200 last:border-0">
                     <span className="text-xxs font-bold text-neutral-400 uppercase tracking-wider block">Calorias</span>
                     <p className="text-base font-black text-neutral-900">{analysisResult.calories} <span className="text-xxs font-normal">kcal</span></p>
@@ -307,6 +307,10 @@ export default function AlimentacaoView({
                   <div className="space-y-0.5 border-r border-neutral-200 last:border-0">
                     <span className="text-xxs font-bold text-neutral-400 uppercase tracking-wider block">Proteínas</span>
                     <p className="text-base font-black text-neutral-900">{analysisResult.protein} <span className="text-xxs font-normal">g</span></p>
+                  </div>
+                  <div className="space-y-0.5 border-r border-neutral-200 last:border-0">
+                    <span className="text-xxs font-bold text-neutral-400 uppercase tracking-wider block">Gorduras</span>
+                    <p className="text-base font-black text-neutral-900">{analysisResult.fats || 0} <span className="text-xxs font-normal">g</span></p>
                   </div>
                 </div>
               </div>
@@ -391,6 +395,11 @@ export default function AlimentacaoView({
                         <div className="text-right">
                           <span className="text-xxs text-neutral-400 font-bold uppercase tracking-wider block">Carbos</span>
                           <span className="text-xs font-extrabold text-neutral-900">{log.nutrition.carbohydrates}g</span>
+                        </div>
+                        <div className="h-6 w-px bg-neutral-200" />
+                        <div className="text-right">
+                          <span className="text-xxs text-neutral-400 font-bold uppercase tracking-wider block">Gords</span>
+                          <span className="text-xs font-extrabold text-neutral-900">{log.nutrition.fats || 0}g</span>
                         </div>
                         <div className="h-6 w-px bg-neutral-200" />
                         <div className="text-right">

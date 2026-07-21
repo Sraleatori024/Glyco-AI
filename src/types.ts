@@ -1,12 +1,21 @@
 export type DiabetesType = "tipo1" | "tipo2" | "gestacional" | "pre_diabetes";
 
 export interface UserProfile {
+  uid?: string;
   name: string;
+  email?: string;
+  photoURL?: string | null;
+  role?: string;
+  plan?: string;
+  subscriptionStatus?: string;
+  createdAt?: string;
+  updatedAt?: string;
+
   age: number;
   gender: string;
-  height: number; // in cm
-  weight: number; // in kg
-  diabetesType: DiabetesType;
+  height: number | null; // in cm
+  weight: number | null; // in kg
+  diabetesType: DiabetesType | null;
   medications: string[];
   usesInsulin: boolean;
   insulinTypes: string[];

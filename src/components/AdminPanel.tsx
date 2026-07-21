@@ -62,25 +62,13 @@ export default function AdminPanel({ adminEmail, adminUid, onBackToApp }: AdminP
       
       for (const userDoc of usersSnap.docs) {
         const data = userDoc.data();
-        
-        // Try to fetch profile to get user name
-        let userName = "Paciente";
-        try {
-          const profileSnap = await getDocs(collection(db, `users/${userDoc.id}/profile`));
-          if (!profileSnap.empty) {
-            userName = profileSnap.docs[0].data().name || "Paciente";
-          }
-        } catch (e) {
-          console.warn("Could not load profile for user:", userDoc.id);
-        }
-
         loadedUsers.push({
           id: userDoc.id,
           email: data.email || "sem@email.com",
-          name: userName,
+          name: data.name || "Paciente",
           role: data.role || "user",
-          subscriptionPlan: data.subscriptionPlan || "free",
-          subscriptionStatus: data.subscriptionStatus || "active",
+          subscriptionPlan: data.plan || data.subscriptionPlan || "free",
+          subscriptionStatus: data.subscriptionStatus || "inactive",
           isBlocked: !!data.isBlocked,
           createdAt: data.createdAt || new Date().toISOString()
         });
@@ -153,6 +141,7 @@ export default function AdminPanel({ adminEmail, adminUid, onBackToApp }: AdminP
     try {
       if (!user.id.startsWith("demo")) {
         await updateDoc(doc(db, "users", user.id), { 
+          plan: nextPlan,
           subscriptionPlan: nextPlan,
           subscriptionStatus: nextPlan === "premium" ? "active" : "canceled"
         });
@@ -180,6 +169,38 @@ export default function AdminPanel({ adminEmail, adminUid, onBackToApp }: AdminP
       setAuditLogs(prev => [newLog, ...prev]);
     } catch (err) {
       console.error("Failed to change user plan:", err);
+    }
+  };
+
+  const handleToggleAdmin = async (user: AdminUser) => {
+    const nextRole = user.role === "admin" ? "user" : "admin";
+    try {
+      if (!user.id.startsWith("demo")) {
+        await updateDoc(doc(db, "users", user.id), { role: nextRole });
+        // Log action
+        await addDoc(collection(db, "audit_logs"), {
+          adminEmail,
+          action: nextRole === "admin" ? "PROMOVER_ADMIN" : "REVOGAR_ADMIN",
+          targetUserId: user.id,
+          timestamp: new Date().toISOString(),
+          details: `Papel do usuário ${user.name} (${user.email}) foi alterado para ${nextRole.toUpperCase()} por ${adminEmail}`
+        });
+      }
+
+      // Update state
+      setUsers(prev => prev.map(u => u.id === user.id ? { ...u, role: nextRole } : u));
+      
+      // Update logs state
+      const newLog: AuditLog = {
+        adminEmail,
+        action: nextRole === "admin" ? "PROMOVER_ADMIN" : "REVOGAR_ADMIN",
+        targetUserId: user.id,
+        timestamp: new Date().toISOString(),
+        details: `Papel do usuário ${user.name} (${user.email}) foi alterado para ${nextRole.toUpperCase()} por ${adminEmail}`
+      };
+      setAuditLogs(prev => [newLog, ...prev]);
+    } catch (err) {
+      console.error("Failed to change user role:", err);
     }
   };
 
@@ -363,7 +384,16 @@ export default function AdminPanel({ adminEmail, adminUid, onBackToApp }: AdminP
                   <tbody className="divide-y divide-neutral-900 text-xs">
                     {filteredUsers.map((user) => (
                       <tr key={user.id} className="hover:bg-neutral-900/30 transition-colors">
-                        <td className="p-4 font-bold text-neutral-100">{user.name}</td>
+                        <td className="p-4 font-bold text-neutral-100">
+                          <div className="flex items-center gap-2">
+                            {user.name}
+                            {user.role === "admin" && (
+                              <span className="bg-amber-500/10 text-amber-400 border border-amber-500/20 text-[9px] font-black tracking-wider uppercase px-1.5 py-0.5 rounded-sm">
+                                Admin
+                              </span>
+                            )}
+                          </div>
+                        </td>
                         <td className="p-4 text-neutral-400 font-mono text-xxs">{user.email}</td>
                         <td className="p-4">
                           <span className={`px-2 py-0.5 rounded-full text-xxs font-bold border uppercase tracking-wider ${
@@ -387,6 +417,16 @@ export default function AdminPanel({ adminEmail, adminUid, onBackToApp }: AdminP
                           {new Date(user.createdAt).toLocaleDateString("pt-BR")}
                         </td>
                         <td className="p-4 text-right space-x-1.5 shrink-0">
+                          {/* Toggle Admin Button */}
+                          <button
+                            onClick={() => handleToggleAdmin(user)}
+                            className="bg-neutral-900 hover:bg-neutral-800 text-neutral-300 hover:text-white border border-neutral-800 rounded-lg px-2.5 py-1 text-xxs font-bold transition-colors cursor-pointer inline-flex items-center gap-1"
+                            title="Alternar Permissão de Administrador"
+                          >
+                            <ShieldCheck className="w-3.5 h-3.5 text-amber-400" />
+                            {user.role === "admin" ? "Revogar Admin" : "Tornar Admin"}
+                          </button>
+
                           {/* Change Plan Button */}
                           <button
                             onClick={() => handleTogglePlan(user)}

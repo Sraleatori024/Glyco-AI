@@ -1,8 +1,8 @@
 import { useState, useEffect } from "react";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { auth, db } from "./firebase";
-import { collection, getDocs, doc, setDoc } from "firebase/firestore";
-import { syncDocToFirestore, deleteDocFromFirestore } from "./firebaseUtils";
+import { collection, getDocs, doc, setDoc, query, where } from "firebase/firestore";
+import { syncDocToFirestore, deleteDocFromFirestore, getOrCreateUserDoc } from "./firebaseUtils";
 import {
   UserProfile,
   GlucoseLog,
@@ -53,7 +53,10 @@ import {
 
 export default function App() {
   // Authentication & Plan States
-  const [user, setUser] = useState<{ uid: string; email: string } | null>(null);
+  const [user, setUser] = useState<{ uid: string; email: string } | null>(() => {
+    const saved = localStorage.getItem("glyco_offline_user");
+    return saved ? JSON.parse(saved) : null;
+  });
   const [authChecking, setAuthChecking] = useState(true);
   const [isPremium, setIsPremium] = useState<boolean>(() => localStorage.getItem("glyco_premium") === "true");
 
@@ -66,6 +69,7 @@ export default function App() {
   const [chatMessages, setChatMessages] = useState<Message[]>([]);
   
   const [currentView, setCurrentView] = useState("dashboard");
+  const [selectedExerciseId, setSelectedExerciseId] = useState<string | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
 
@@ -84,20 +88,18 @@ export default function App() {
           console.warn("Firestore offline check done:", e);
         }
 
-        // 1. Fetch user profile
+        // 1. Fetch or create user profile
         try {
-          const profileSnap = await getDocs(collection(db, `users/${firebaseUser.uid}/profile`));
-          if (!profileSnap.empty) {
-            setProfile(profileSnap.docs[0].data() as UserProfile);
+          const userProfileData = await getOrCreateUserDoc(
+            firebaseUser.uid,
+            firebaseUser.email || "",
+            firebaseUser.displayName,
+            firebaseUser.photoURL
+          );
+          if (userProfileData) {
+            setProfile(userProfileData as UserProfile);
           } else {
-            const savedLocalProfile = localStorage.getItem("glyco_profile");
-            if (savedLocalProfile) {
-              const p = JSON.parse(savedLocalProfile);
-              setProfile(p);
-              await setDoc(doc(db, "users", firebaseUser.uid, "profile", "default"), p);
-            } else {
-              setProfile(null);
-            }
+            setProfile(null);
           }
         } catch (err) {
           console.error("Error fetching profile from Firestore:", err);
@@ -105,9 +107,10 @@ export default function App() {
           if (savedLocalProfile) setProfile(JSON.parse(savedLocalProfile));
         }
 
-        // 2. Fetch glucose logs
+        // 2. Fetch glucose logs (top-level collection: glucose_records)
         try {
-          const glucoseSnap = await getDocs(collection(db, `users/${firebaseUser.uid}/glucose`));
+          const q = query(collection(db, "glucose_records"), where("uid", "==", firebaseUser.uid));
+          const glucoseSnap = await getDocs(q);
           if (!glucoseSnap.empty) {
             setGlucoseLogs(glucoseSnap.docs.map((d) => ({ id: d.id, ...d.data() } as GlucoseLog)));
           } else {
@@ -119,9 +122,10 @@ export default function App() {
           setGlucoseLogs(saved ? JSON.parse(saved) : INITIAL_GLUCOSE_LOGS);
         }
 
-        // 3. Fetch food logs
+        // 3. Fetch food logs (top-level collection: meals)
         try {
-          const foodSnap = await getDocs(collection(db, `users/${firebaseUser.uid}/food`));
+          const q = query(collection(db, "meals"), where("uid", "==", firebaseUser.uid));
+          const foodSnap = await getDocs(q);
           if (!foodSnap.empty) {
             setFoodLogs(foodSnap.docs.map((d) => ({ id: d.id, ...d.data() } as FoodLog)));
           } else {
@@ -133,9 +137,10 @@ export default function App() {
           setFoodLogs(saved ? JSON.parse(saved) : INITIAL_FOOD_LOGS);
         }
 
-        // 4. Fetch medication logs
+        // 4. Fetch medication logs (top-level collection: medications)
         try {
-          const medsSnap = await getDocs(collection(db, `users/${firebaseUser.uid}/meds`));
+          const q = query(collection(db, "medications"), where("uid", "==", firebaseUser.uid));
+          const medsSnap = await getDocs(q);
           if (!medsSnap.empty) {
             setMedicationLogs(medsSnap.docs.map((d) => ({ id: d.id, ...d.data() } as MedicationLog)));
           } else {
@@ -147,9 +152,10 @@ export default function App() {
           setMedicationLogs(saved ? JSON.parse(saved) : INITIAL_MEDICATION_LOGS);
         }
 
-        // 5. Fetch exercise logs
+        // 5. Fetch exercise logs (top-level collection: exercise_history)
         try {
-          const exercisesSnap = await getDocs(collection(db, `users/${firebaseUser.uid}/exercises`));
+          const q = query(collection(db, "exercise_history"), where("uid", "==", firebaseUser.uid));
+          const exercisesSnap = await getDocs(q);
           if (!exercisesSnap.empty) {
             setExerciseLogs(exercisesSnap.docs.map((d) => ({ id: d.id, ...d.data() } as ExerciseLog)));
           } else {
@@ -161,9 +167,10 @@ export default function App() {
           setExerciseLogs(saved ? JSON.parse(saved) : INITIAL_EXERCISE_LOGS);
         }
 
-        // 6. Fetch chat messages
+        // 6. Fetch chat messages (top-level collection: ai_history)
         try {
-          const chatSnap = await getDocs(collection(db, `users/${firebaseUser.uid}/chat`));
+          const q = query(collection(db, "ai_history"), where("uid", "==", firebaseUser.uid));
+          const chatSnap = await getDocs(q);
           if (!chatSnap.empty) {
             setChatMessages(chatSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Message)));
           } else {
@@ -175,8 +182,21 @@ export default function App() {
           setChatMessages(saved ? JSON.parse(saved) : INITIAL_CHAT_MESSAGES);
         }
       } else {
-        setUser(null);
-        setProfile(null);
+        const savedOffline = localStorage.getItem("glyco_offline_user");
+        if (savedOffline) {
+          const parsed = JSON.parse(savedOffline);
+          setUser(parsed);
+          const savedLocalProfile = localStorage.getItem("glyco_profile");
+          setProfile(savedLocalProfile ? JSON.parse(savedLocalProfile) : INITIAL_PROFILE);
+          setGlucoseLogs(localStorage.getItem("glyco_glucose") ? JSON.parse(localStorage.getItem("glyco_glucose")!) : INITIAL_GLUCOSE_LOGS);
+          setFoodLogs(localStorage.getItem("glyco_food") ? JSON.parse(localStorage.getItem("glyco_food")!) : INITIAL_FOOD_LOGS);
+          setMedicationLogs(localStorage.getItem("glyco_meds") ? JSON.parse(localStorage.getItem("glyco_meds")!) : INITIAL_MEDICATION_LOGS);
+          setExerciseLogs(localStorage.getItem("glyco_exercises") ? JSON.parse(localStorage.getItem("glyco_exercises")!) : INITIAL_EXERCISE_LOGS);
+          setChatMessages(localStorage.getItem("glyco_chat") ? JSON.parse(localStorage.getItem("glyco_chat")!) : INITIAL_CHAT_MESSAGES);
+        } else {
+          setUser(null);
+          setProfile(null);
+        }
       }
       setAuthChecking(false);
     });
@@ -356,7 +376,7 @@ export default function App() {
       // Clear user records in Firestore - simple deletion or let them start fresh
       try {
         const { deleteDoc, doc } = await import("firebase/firestore");
-        await deleteDoc(doc(db, "users", user.uid, "profile", "default"));
+        await deleteDoc(doc(db, "users", user.uid));
       } catch (e) {
         console.warn("Could not reset profile doc from Firestore:", e);
       }
@@ -405,7 +425,7 @@ export default function App() {
   }
 
   // Onboarding Interception
-  if (!profile) {
+  if (!profile || !profile.diabetesType) {
     return (
       <OnboardingView
         onComplete={(newProfile) => {
@@ -416,7 +436,7 @@ export default function App() {
     );
   }
 
-  const isAdmin = user.email === "nickinicolas380@gmail.com";
+  const isAdmin = user.email === "nickinicolas380@gmail.com" || profile?.role === "admin";
 
   // Sidebar navigation configuration
   const navigationItems = [
@@ -482,11 +502,16 @@ export default function App() {
               </div>
               <div className="min-w-0 flex-1">
                 <p className="text-xs font-bold truncate">{profile.name}</p>
-                <p className="text-xxs text-neutral-400 capitalize truncate">Diabetes {profile.diabetesType.replace("_", " ")}</p>
+                <p className="text-xxs text-neutral-400 capitalize truncate">Diabetes {profile?.diabetesType ? profile.diabetesType.replace("_", " ") : "não especificado"}</p>
               </div>
             </div>
             <button
-              onClick={() => signOut(auth)}
+              onClick={async () => {
+                localStorage.removeItem("glyco_offline_user");
+                setUser(null);
+                setProfile(null);
+                await signOut(auth);
+              }}
               title="Encerrar Sessão"
               className="p-1.5 text-neutral-400 hover:text-red-500 rounded-lg transition-colors cursor-pointer"
             >
@@ -607,6 +632,9 @@ export default function App() {
               logs={exerciseLogs}
               onAddLog={handleAddExerciseLog}
               onDeleteLog={handleDeleteExerciseLog}
+              profile={profile}
+              selectedExerciseId={selectedExerciseId}
+              onClearSelectedExercise={() => setSelectedExerciseId(null)}
             />
           )}
 
@@ -619,6 +647,10 @@ export default function App() {
               currentStats={currentStats}
               isPremium={isPremium}
               onNavigateToSubscription={() => setCurrentView("subscription")}
+              onViewExercise={(exId) => {
+                setSelectedExerciseId(exId);
+                setCurrentView("exercicios");
+              }}
             />
           )}
 
@@ -642,7 +674,7 @@ export default function App() {
                 setIsPremium(true);
                 localStorage.setItem("glyco_premium", "true");
                 // Securely save subscription state to user record in Firestore
-                if (user) {
+                if (user && user.uid !== "admin_test") {
                   try {
                     await setDoc(doc(db, "users", user.uid), {
                       email: user.email,
@@ -658,7 +690,7 @@ export default function App() {
               onCancel={async () => {
                 setIsPremium(false);
                 localStorage.setItem("glyco_premium", "false");
-                if (user) {
+                if (user && user.uid !== "admin_test") {
                   try {
                     await setDoc(doc(db, "users", user.uid), {
                       subscriptionPlan: "free",
@@ -673,7 +705,7 @@ export default function App() {
               onReactivate={async () => {
                 setIsPremium(true);
                 localStorage.setItem("glyco_premium", "true");
-                if (user) {
+                if (user && user.uid !== "admin_test") {
                   try {
                     await setDoc(doc(db, "users", user.uid), {
                       subscriptionPlan: "premium",

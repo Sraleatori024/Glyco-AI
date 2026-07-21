@@ -154,7 +154,16 @@ Use as seguintes regras cruciais de comportamento:
 2. Leve em consideração o perfil clínico do paciente fornecido e suas estatísticas recentes.
 3. Se o paciente perguntar sobre alimentação (ex: "Posso comer pizza?"), forneça conselhos práticos e nutricionais inteligentes, explicando sobre moderação, contagem de carboidratos, ordem dos alimentos (comer fibras/proteínas antes) e o impacto esperado, sem proibicionismo punitivo.
 4. Se o usuário estiver relatando sintomas de hipoglicemia (tontura, suor frio, tremores), oriente IMEDIATAMENTE a regra dos 15g de carboidratos rápidos (ex: 150ml de refrigerante comum ou suco de laranja) e medir novamente em 15 minutos.
-5. Sempre exiba um pequeno lembrete humilde de que suas respostas são informativas e não substituem o médico do paciente.`;
+5. Se você sugerir ou recomendar qualquer atividade física ou exercício do nosso catálogo, adicione explicitamente no final do texto o marcador "[EXERCISE:ID_DO_EXERCICIO]" em uma linha própria para que a interface de chat renderize um botão interativo "Ver como fazer". Os exercícios do catálogo disponíveis são:
+   - Caminhada Rítmica de Intervalo -> ID: caminhada_moderada
+   - Agachamento Livre com Cadeira -> ID: agachamento_casa
+   - Alongamento Integral para Flexibilidade -> ID: alongamento_diabetes
+   - Corrida Intervalada Aeróbica/Anaeróbica -> ID: corrida_intervalada
+   - Mobilidade Dinâmica de Quadril e Tornozelo -> ID: mobilidade_quadril
+   - Pedalada Estática de Baixo Impacto -> ID: pedalada_leve
+   - Remada Sentada com Faixa Elástica -> ID: forca_elastico
+   Exemplo: "Uma caminhada ativa pós-refeição ajudará a reduzir o pico glicêmico. [EXERCISE:caminhada_moderada]". Use APENAS esses IDs válidos.
+6. Sempre exiba um pequeno lembrete humilde de que suas respostas são informativas e não substituem o médico do paciente.`;
 
     const contextData = `
 --- CONTEXTO DO PACIENTE ---
@@ -187,6 +196,92 @@ Tempo no alvo: ${currentStats?.timeInRange || "75"}%
   } catch (error: any) {
     console.error("Erro no chat inteligente:", error);
     res.status(500).json({ error: error.message || "Erro interno do servidor no chat." });
+  }
+});
+
+// 2.5. Endpoint for smart exercise daily plan generation
+app.post("/api/gemini/exercise-plan", async (req: any, res: any) => {
+  try {
+    const { profile, currentStats, recentGlucoseLogs } = req.body;
+
+    if (!profile) {
+      return res.status(400).json({ error: "Perfil do usuário é obrigatório." });
+    }
+
+    const ai = getGeminiClient();
+
+    const systemPrompt = `Você é um educador físico e especialista médico em diabetes. 
+Sua tarefa é montar um Plano de Exercícios ("Plano do Dia") personalizado e seguro em português brasileiro.
+Esse plano deve se alinhar com a aptidão do usuário, seu tipo de diabetes e as precauções glicêmicas ideais.
+As sugestões devem ser amigáveis e estruturadas em JSON.`;
+
+    const patientContext = `
+--- CONTEXTO DO PACIENTE ---
+Nome: ${profile.name || "Paciente"}
+Idade: ${profile.age || "40"} anos
+Tipo de Diabetes: ${profile.diabetesType || "tipo2"}
+Insulina em uso: ${profile.usesInsulin ? "Sim" : "Não"}
+Estatísticas recentes de glicose: Média ${currentStats?.averageGlucose || "140"} mg/dL, Tempo no Alvo ${currentStats?.timeInRange || "70"}%
+Registros de glicemia recentes: ${JSON.stringify(recentGlucoseLogs || [])}
+`;
+
+    const promptText = `
+Com base nas seguintes atividades físicas em nossa biblioteca, monte um plano ideal do dia com 1 a 3 exercícios sugeridos, adaptados para o perfil clínico do paciente:
+- caminhada_moderada (Caminhada Rítmica de Intervalo)
+- agachamento_casa (Agachamento Livre com Cadeira)
+- alongamento_diabetes (Alongamento Integral para Flexibilidade)
+- corrida_intervalada (Corrida Intervalada Aeróbica/Anaeróbica - ideal apenas para avançados/jovens com bom controle)
+- mobilidade_quadril (Mobilidade Dinâmica de Quadril e Tornozelo)
+- pedalada_leve (Pedalada Estática de Baixo Impacto)
+- forca_elastico (Remada Sentada com Faixa Elástica)
+
+Selecione os exercícios mais adequados para a idade de ${profile.age} anos e diabetes do tipo ${profile.diabetesType}.
+Retorne as informações em um formato JSON válido estruturado para renderização direta na interface.`;
+
+    const response = await ai.models.generateContent({
+      model: "gemini-3.5-flash",
+      contents: [
+        { text: systemPrompt },
+        { text: patientContext },
+        { text: promptText }
+      ],
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            title: { type: Type.STRING, description: "Título curto e acolhedor para o plano do dia (ex: 'Plano de Equilíbrio Glicêmico')." },
+            description: { type: Type.STRING, description: "Resumo explicativo de por que esse plano foi selecionado para o perfil dele." },
+            recommendedExercises: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  exerciseId: { type: Type.STRING, description: "ID do exercício correspondente no nosso catálogo (ex: 'caminhada_moderada', 'agachamento_casa', 'alongamento_diabetes', etc., se aplicável)." },
+                  name: { type: Type.STRING, description: "Nome do exercício." },
+                  duration: { type: Type.STRING, description: "Duração recomendada ou número de séries/repetições (ex: '15 minutos', '3 séries de 10 repetições')." },
+                  intensity: { type: Type.STRING, description: "Intensidade recomendada: 'leve', 'moderada' ou 'alta'." },
+                  order: { type: Type.NUMBER, description: "Ordem sequencial da atividade, iniciando de 1." }
+                },
+                required: ["name", "duration", "intensity", "order"]
+              },
+              description: "Lista de 1 a 3 atividades sequenciais sugeridas."
+            },
+            restTimeBetween: { type: Type.STRING, description: "Recomendação de tempo de descanso entre os exercícios/séries." },
+            suggestedIntensityText: { type: Type.STRING, description: "Orientações gerais sobre percepção de esforço seguro." },
+            glycemicPrecautions: { type: Type.STRING, description: "Precauções de segurança glicêmica essenciais (ex: 'Não treinar se glicose estiver abaixo de 100 mg/dL sem carboidrato prévio, ou acima de 250 mg/dL se houver cetonas')." },
+            medicalDisclaimer: { type: Type.STRING, description: "Aviso médico obrigatório deixando claro que é uma sugestão de apoio e não prescrição médica." }
+          },
+          required: ["title", "description", "recommendedExercises", "restTimeBetween", "suggestedIntensityText", "glycemicPrecautions", "medicalDisclaimer"]
+        }
+      }
+    });
+
+    const resultText = response.text || "{}";
+    res.json(JSON.parse(resultText));
+  } catch (error: any) {
+    console.error("Erro ao gerar plano de exercícios:", error);
+    res.status(500).json({ error: error.message || "Erro interno do servidor ao gerar plano de exercícios." });
   }
 });
 

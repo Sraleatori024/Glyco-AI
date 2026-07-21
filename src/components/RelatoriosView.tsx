@@ -341,7 +341,7 @@ export default function RelatoriosView({
 
           <div className="space-y-1">
             <span className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider block">Condição Metabólica</span>
-            <h4 className="text-xs font-bold text-neutral-800 capitalize">Diabetes {profile.diabetesType.replace("_", " ")}</h4>
+            <h4 className="text-xs font-bold text-neutral-800 capitalize">Diabetes {profile?.diabetesType ? profile.diabetesType.replace("_", " ") : "não especificado"}</h4>
             <span className="text-xxs text-neutral-500 block">Altura: {profile.height}cm | Peso: {profile.weight}kg</span>
           </div>
 
@@ -441,7 +441,7 @@ export default function RelatoriosView({
                             minute: "2-digit"
                           })}
                         </td>
-                        <td className="p-3 capitalize">{log.type.replace("_", " ")}</td>
+                        <td className="p-3 capitalize">{(log.type || "").replace("_", " ")}</td>
                         <td className={`p-3 text-right font-black ${inRange ? "text-emerald-600" : "text-amber-600"}`}>
                           {log.value} mg/dL
                         </td>

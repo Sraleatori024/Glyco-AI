@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { Message, UserProfile } from "../types";
-import { Send, Sparkles, User, Brain, AlertTriangle, RefreshCw, Lock } from "lucide-react";
+import { Send, Sparkles, User, Brain, AlertTriangle, RefreshCw, Lock, Dumbbell } from "lucide-react";
+import { SMART_EXERCISES } from "../data/exercises";
 
 interface ChatViewProps {
   messages: Message[];
@@ -13,6 +14,7 @@ interface ChatViewProps {
   };
   isPremium: boolean;
   onNavigateToSubscription?: () => void;
+  onViewExercise?: (exerciseId: string) => void;
 }
 
 const CHAT_PRESETS = [
@@ -30,6 +32,7 @@ export default function ChatView({
   currentStats,
   isPremium,
   onNavigateToSubscription,
+  onViewExercise,
 }: ChatViewProps) {
   const [inputText, setInputText] = useState("");
   const [loading, setLoading] = useState(false);
@@ -149,6 +152,18 @@ export default function ChatView({
         <div className="flex-1 overflow-y-auto p-6 space-y-4">
           {messages.map((msg) => {
             const isUser = msg.sender === "user";
+            
+            // Extract exercise tags from the message text
+            const exerciseRegex = /\[EXERCISE:([a-zA-Z0-9_-]+)\]/g;
+            const exerciseMatches: string[] = [];
+            let match;
+            while ((match = exerciseRegex.exec(msg.text)) !== null) {
+              exerciseMatches.push(match[1]);
+            }
+            
+            // Clean the exercise tag out of the visible message text
+            const cleanMessageText = msg.text.replace(/\[EXERCISE:[a-zA-Z0-9_-]+\]/g, "").trim();
+
             return (
               <div
                 key={msg.id}
@@ -158,12 +173,41 @@ export default function ChatView({
                   {isUser ? <User className="w-4 h-4" /> : <Brain className="w-4 h-4" />}
                 </div>
 
-                <div className={`p-4 rounded-3xl border text-sm leading-relaxed ${
-                  isUser
-                    ? "bg-blue-600 border-blue-600 text-white rounded-tr-none shadow-sm shadow-blue-100"
-                    : "bg-neutral-50 border-neutral-150 text-neutral-800 rounded-tl-none"
-                }`}>
-                  <p className="whitespace-pre-wrap">{msg.text}</p>
+                <div className="flex flex-col gap-2 max-w-full">
+                  <div className={`p-4 rounded-3xl border text-sm leading-relaxed ${
+                    isUser
+                      ? "bg-blue-600 border-blue-600 text-white rounded-tr-none shadow-sm shadow-blue-100"
+                      : "bg-neutral-50 border-neutral-150 text-neutral-800 rounded-tl-none"
+                  }`}>
+                    <p className="whitespace-pre-wrap">{cleanMessageText}</p>
+                  </div>
+
+                  {!isUser && exerciseMatches.map((exerciseId) => {
+                    const exercise = SMART_EXERCISES.find(e => e.id === exerciseId);
+                    if (!exercise) return null;
+                    return (
+                      <div
+                        key={exerciseId}
+                        className="bg-blue-50/75 border border-blue-150 p-4 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-3 shadow-xxs max-w-md animate-fade-in"
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 bg-blue-100 rounded-xl flex items-center justify-center text-blue-600 shrink-0">
+                            <Dumbbell className="w-5 h-5" />
+                          </div>
+                          <div className="text-left">
+                            <p className="text-xs font-black text-blue-900 leading-tight">{exercise.name}</p>
+                            <p className="text-[10px] font-semibold text-blue-700 mt-0.5">Dificuldade: {exercise.difficulty === "iniciante" ? "Iniciante" : exercise.difficulty === "intermediario" ? "Intermediário" : "Avançado"}</p>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => onViewExercise?.(exerciseId)}
+                          className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xxs font-bold rounded-xl transition-all shadow-xs hover:shadow-md cursor-pointer whitespace-nowrap"
+                        >
+                          Ver como fazer
+                        </button>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             );

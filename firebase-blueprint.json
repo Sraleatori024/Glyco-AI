@@ -1,87 +1,162 @@
 {
-  "collections": {
-    "users": {
-      "description": "User accounts with system settings and subscription status",
-      "schema": {
-        "email": "string",
-        "role": "string",
-        "subscriptionStatus": "string",
-        "subscriptionPlan": "string",
-        "currentPeriodEnd": "string",
-        "isBlocked": "boolean",
-        "createdAt": "string",
-        "updatedAt": "string"
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile, clinical configurations and billing information.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "role": { "type": "string", "enum": ["user", "admin"] },
+        "plan": { "type": "string", "enum": ["free", "premium"] },
+        "subscriptionPlan": { "type": "string", "enum": ["free", "premium"] },
+        "subscriptionStatus": { "type": "string", "enum": ["active", "canceled", "inactive"] },
+        "diabetesType": { "type": "string" },
+        "weight": { "type": "number" },
+        "height": { "type": "number" },
+        "targetGlucose": { "type": "number" },
+        "age": { "type": "number" },
+        "gender": { "type": "string" },
+        "medications": { "type": "array" },
+        "usesInsulin": { "type": "boolean" },
+        "insulinTypes": { "type": "array" },
+        "targetGlucoseMinJejum": { "type": "number" },
+        "targetGlucoseMaxJejum": { "type": "number" },
+        "targetGlucoseMaxPosPrandial": { "type": "number" },
+        "goals": { "type": "array" },
+        "isBlocked": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
       },
-      "subcollections": {
-        "profile": {
-          "description": "Health profile of the user",
-          "schema": {
-            "name": "string",
-            "age": "number",
-            "gender": "string",
-            "height": "number",
-            "weight": "number",
-            "diabetesType": "string",
-            "medications": "array",
-            "usesInsulin": "boolean",
-            "insulinTypes": "array",
-            "targetGlucoseMinJejum": "number",
-            "targetGlucoseMaxJejum": "number",
-            "targetGlucoseMaxPosPrandial": "number",
-            "goals": "array"
-          }
-        },
-        "logs": {
-          "description": "Glucose level, food intake, medication intake, exercise session and insulin records",
-          "schema": {
-            "id": "string",
-            "type": "string",
-            "timestamp": "string",
-            "glucoseValue": "number",
-            "glucoseType": "string",
-            "foodDescription": "string",
-            "foodNutrition": "object",
-            "medicationName": "string",
-            "medicationDose": "string",
-            "medicationTimeScheduled": "string",
-            "exerciseType": "string",
-            "exerciseDuration": "number",
-            "exerciseIntensity": "string",
-            "exerciseImpact": "string",
-            "notes": "string"
-          }
-        },
-        "ai_history": {
-          "description": "History of chat messages and assistant suggestions",
-          "schema": {
-            "id": "string",
-            "sender": "string",
-            "text": "string",
-            "timestamp": "string"
-          }
-        },
-        "reports": {
-          "description": "Generated reports metadata",
-          "schema": {
-            "id": "string",
-            "dateStart": "string",
-            "dateEnd": "string",
-            "generatedAt": "string",
-            "summary": "string"
-          }
-        }
-      }
+      "required": ["uid", "email"]
     },
-    "audit_logs": {
-      "description": "System admin audit trails of sensitive administrative actions",
-      "schema": {
-        "adminId": "string",
-        "adminEmail": "string",
-        "action": "string",
-        "targetUserId": "string",
-        "timestamp": "string",
-        "details": "string"
-      }
+    "GlucoseLog": {
+      "title": "GlucoseLog",
+      "description": "Blood glucose log entry.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "uid": { "type": "string" },
+        "value": { "type": "number" },
+        "type": { "type": "string", "enum": ["jejum", "antes_refeicao", "depois_refeicao", "antes_dormir", "outros"] },
+        "notes": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "uid", "value", "type", "timestamp"]
+    },
+    "FoodLog": {
+      "title": "FoodLog",
+      "description": "Meal and food intake log.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "uid": { "type": "string" },
+        "description": { "type": "string" },
+        "carbs": { "type": "number" },
+        "calories": { "type": "number" },
+        "protein": { "type": "number" },
+        "fats": { "type": "number" },
+        "notes": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "uid", "description", "carbs", "timestamp"]
+    },
+    "MedicationLog": {
+      "title": "MedicationLog",
+      "description": "Medication dose administration log.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "uid": { "type": "string" },
+        "name": { "type": "string" },
+        "dosage": { "type": "string" },
+        "status": { "type": "string", "enum": ["aplicado", "pendente"] },
+        "notes": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "uid", "name", "dosage", "status", "timestamp"]
+    },
+    "ExerciseLog": {
+      "title": "ExerciseLog",
+      "description": "Physical activity log.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "uid": { "type": "string" },
+        "type": { "type": "string" },
+        "duration": { "type": "number" },
+        "intensity": { "type": "string", "enum": ["leve", "moderado", "intenso"] },
+        "glucoseImpact": { "type": "string" },
+        "notes": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "uid", "type", "duration", "intensity", "timestamp"]
+    },
+    "ChatMessage": {
+      "title": "ChatMessage",
+      "description": "Co-pilot chat message history entry.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "uid": { "type": "string" },
+        "sender": { "type": "string", "enum": ["user", "assistant"] },
+        "text": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "uid", "sender", "text", "timestamp"]
+    },
+    "AuditLog": {
+      "title": "AuditLog",
+      "description": "Security and administrative audit trail.",
+      "type": "object",
+      "properties": {
+        "adminEmail": { "type": "string" },
+        "action": { "type": "string" },
+        "targetUserId": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "details": { "type": "string" }
+      },
+      "required": ["adminEmail", "action", "targetUserId", "timestamp"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "Stores basic user profiles, RBAC configurations, and preferences."
+    },
+    "/glucose_records/{recordId}": {
+      "schema": "GlucoseLog",
+      "description": "Stores blood sugar levels."
+    },
+    "/meals/{mealId}": {
+      "schema": "FoodLog",
+      "description": "Stores logged meals and nutritional records."
+    },
+    "/medications/{medId}": {
+      "schema": "MedicationLog",
+      "description": "Stores logged medicine and insulin intake logs."
+    },
+    "/exercise_history/{exId}": {
+      "schema": "ExerciseLog",
+      "description": "Stores logged physical exercises and activity logs."
+    },
+    "/ai_history/{msgId}": {
+      "schema": "ChatMessage",
+      "description": "Stores the chat assistant's conversation context history."
+    },
+    "/audit_logs/{logId}": {
+      "schema": "AuditLog",
+      "description": "Administrative actions audit stream (restricted to admin permissions)."
     }
   }
 }

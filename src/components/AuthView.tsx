@@ -294,6 +294,27 @@ export default function AuthView({ onAuthSuccess }: AuthViewProps) {
                     </svg>
                     Continuar com o Google
                   </button>
+
+                  <div className="relative flex py-1 items-center">
+                    <div className="flex-grow border-t border-neutral-800/50"></div>
+                    <span className="flex-shrink mx-3 text-xxs font-bold text-neutral-600 uppercase tracking-widest">ou</span>
+                    <div className="flex-grow border-t border-neutral-800/50"></div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      localStorage.setItem("glyco_offline_user", JSON.stringify({
+                        uid: "admin_test",
+                        email: "nickinicolas380@gmail.com"
+                      }));
+                      onAuthSuccess("admin_test", "nickinicolas380@gmail.com");
+                    }}
+                    className="w-full bg-amber-500/10 hover:bg-amber-500/15 text-amber-400 border border-amber-500/30 hover:border-amber-500/50 rounded-xl py-2.5 text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer shadow-xs"
+                  >
+                    <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                    Modo de Testes do CEO (Sem Firebase)
+                  </button>
                 </form>
               </motion.div>
             )}

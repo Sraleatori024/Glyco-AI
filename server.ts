@@ -163,7 +163,8 @@ Use as seguintes regras cruciais de comportamento:
    - Pedalada Estática de Baixo Impacto -> ID: pedalada_leve
    - Remada Sentada com Faixa Elástica -> ID: forca_elastico
    Exemplo: "Uma caminhada ativa pós-refeição ajudará a reduzir o pico glicêmico. [EXERCISE:caminhada_moderada]". Use APENAS esses IDs válidos.
-6. Sempre exiba um pequeno lembrete humilde de que suas respostas são informativas e não substituem o médico do paciente.`;
+6. Sempre exiba um pequeno lembrete humilde de que suas respostas são informativas e não substituem o médico do paciente.
+7. EVITE repetição de frases, mensagens prontas ou respostas genéricas. Cada interação deve ser totalmente dinâmica e adaptada especificamente ao conteúdo e tom da pergunta atual.`;
 
     const contextData = `
 --- CONTEXTO DO PACIENTE ---
@@ -175,22 +176,33 @@ Média recente de glicemia: ${currentStats?.averageGlucose || "135"} mg/dL
 Tempo no alvo: ${currentStats?.timeInRange || "75"}%
 `;
 
-    // Map conversation array to Gemini content parts
-    const geminiContents: any[] = [];
-    geminiContents.push({ text: systemInstruction });
-    geminiContents.push({ text: contextData });
+    const fullInstruction = `${systemInstruction}\n\n${contextData}`;
 
-    // Append history
-    for (const msg of messages) {
-      geminiContents.push({
-        text: `${msg.sender === "user" ? "Usuário" : "Assistente"}: ${msg.text}`
-      });
+    // Map to standard Gemini Content objects for correct multi-turn chat
+    const chatContents = messages.map((msg: any) => ({
+      role: msg.sender === "user" ? "user" : "model",
+      parts: [{ text: msg.text }]
+    }));
+
+    // DEBUG LOGGING
+    console.log(`\n--- [DEBUG CHAT ASSISTANTE] ---`);
+    console.log(`[MODELO UTILIZADO]: gemini-3.5-flash`);
+    console.log(`[QUANTIDADE DE MENSAGENS NO HISTÓRICO]: ${messages.length}`);
+    console.log(`[PERFIL DO PACIENTE]: Tipo ${profile?.diabetesType || "Tipo 2"}, Insulina: ${profile?.usesInsulin ? "Sim" : "Não"}`);
+    if (messages.length > 0) {
+      console.log(`[ÚLTIMA PERGUNTA DO USUÁRIO]: "${messages[messages.length - 1].text}"`);
     }
 
     const response = await ai.models.generateContent({
       model: "gemini-3.5-flash",
-      contents: geminiContents,
+      contents: chatContents,
+      config: {
+        systemInstruction: fullInstruction,
+      }
     });
+
+    console.log(`[RESPOSTA DA IA GERADA COM SUCESSO, COMPRIMENTO: ${response.text?.length || 0} caracteres]`);
+    console.log(`--- [FIM DEBUG CHAT ASSISTANTE] ---\n`);
 
     res.json({ text: response.text });
   } catch (error: any) {
@@ -296,36 +308,84 @@ app.post("/api/gemini/analyze-food", async (req: any, res: any) => {
 
     const ai = getGeminiClient();
 
-    const systemPrompt = `Você é um nutricionista especialista em diabetes e contagem de carboidratos.
-Sua tarefa é analisar a descrição do prato ou a imagem fornecida, e estimar detalhadamente os valores nutricionais (carboidratos, açúcar, fibras, proteínas, gorduras, calorias), além de calcular a carga glicêmica estimada e o impacto esperado na glicemia do usuário com base no perfil dele.
+    const systemPrompt = `Você é um nutricionista especialista em diabetes, contagem de carboidratos e IA nutricional multimodal.
+Sua tarefa é analisar a imagem fornecida (ou a descrição em texto) e identificar visualmente TODOS os alimentos presentes no prato de forma exata e fiel à foto real recebida.
+Você deve estimar detalhadamente os valores nutricionais baseados na porção visível ou descrita.
 
-IMPORTANTE: Sempre deixe muito claro na explicação que se trata de uma estimativa nutricional informativa para apoiar o paciente, e não de uma medição laboratorial exata.`;
+AVISO MÉDICO OBRIGATÓRIO: Sempre inclua na explicação que se trata de uma estimativa informativa e não laboratorial.`;
 
     const userProfileContext = `
-Perfil de Diabetes do usuário: ${profile?.diabetesType || "Tipo 2"}.
-Faz uso de insulina? ${profile?.usesInsulin ? "Sim" : "Não"}.
+--- DADOS DO PACIENTE ---
+Tipo de Diabetes: ${profile?.diabetesType || "Tipo 2"}
+Usa Insulina? ${profile?.usesInsulin ? "Sim" : "Não"}
 `;
 
-    const promptText = `
-Analise o seguinte alimento:
-"${foodDescription || "Alimento enviado por imagem"}"
+    const systemInstruction = `${systemPrompt}\n\n${userProfileContext}`;
 
-Forneça os valores estimados para uma porção padrão desse prato e o impacto esperado na glicemia em português.
-`;
+    let promptText = "";
+    const contents: any[] = [];
 
-    const contents: any[] = [{ text: systemPrompt }, { text: userProfileContext }];
+    console.log(`\n--- [DEBUG ANALISADOR DE ALIMENTOS MULTIMODAL] ---`);
+    console.log(`[MODELO UTILIZADO]: gemini-3.5-flash`);
 
     if (base64Image) {
-      // If image is provided
-      const mimeType = base64Image.match(/^data:(image\/[a-zA-Z]+);base64,/)?.[1] || "image/jpeg";
-      const cleanBase64 = base64Image.replace(/^data:image\/[a-zA-Z]+;base64,/, "");
+      // Robust Base64 Extraction
+      const parts = base64Image.split(";base64,");
+      const mimeType = parts[0].split(":")[1] || "image/jpeg";
+      const cleanBase64 = parts[1];
+
+      console.log(`[DADOS DA IMAGEM]: Imagem recebida no backend. MimeType: "${mimeType}", Comprimento Base64: ${cleanBase64.length}`);
+
       contents.push({
         inlineData: {
           mimeType,
           data: cleanBase64
         }
       });
+
+      promptText = `
+Você recebeu uma FOTO real de um prato de comida enviada pelo usuário.
+Você deve analisar VISUALMENTE esta foto e identificar todos os alimentos individuais visíveis na imagem.
+
+Sua resposta DEVE ser extremamente fiel ao que está de fato na foto. Não use respostas genéricas ou prontas. Se for pizza, descreva a pizza. Se for feijoada, salada ou strogonoff, identifique as guarnições exatas visíveis na foto.
+
+No campo 'explanation', você DEVE iniciar obrigatoriamente informando o que identificou na imagem, no seguinte formato:
+"Na imagem identifiquei:
+- [alimento 1]
+- [alimento 2]
+..."
+Depois disso, forneça uma análise nutricional completa e amigável contendo orientações práticas focadas em diabetes (ex: ordem de ingestão dos macronutrientes, dicas para achatar a curva glicêmica).
+
+Preencha os campos estruturados de forma realista para o prato e sua porção visível:
+- 'foodName': O nome específico e real do prato identificado (ex: "Feijoada Completa", "Pizza de Calabresa", "Strogonoff de Carne com Batata Palha", "Salada de Folhas com Frango", etc.).
+- 'portionSize': Estimativa da porção (ex: "Prato de 350g", "1 fatia média de 120g", etc.).
+- 'carbohydrates', 'sugar', 'fiber', 'protein', 'fats', 'calories': Estimativa nutricional realista para essa porção.
+- 'glycemicLoad': Carga glicêmica estimada da porção.
+- 'glycemicIndexRating': 'baixo', 'medio' ou 'alto'.
+- 'expectedImpact': 'Baixo', 'Moderado' ou 'Alto' de acordo com o impacto esperado para o diabetes do paciente.
+`;
+      if (foodDescription) {
+        promptText += `\nDescrição adicional do usuário para guiar a análise: "${foodDescription}"`;
+      }
+    } else {
+      console.log(`[DADOS DE TEXTO]: Nenhuma imagem. Descrição de texto recebida: "${foodDescription}"`);
+
+      promptText = `
+Analise a seguinte descrição de refeição:
+"${foodDescription}"
+
+No campo 'explanation', você DEVE iniciar obrigatoriamente no seguinte formato:
+"Na refeição descrita identifiquei:
+- [alimento 1]
+- [alimento 2]
+..."
+Depois, forneça as estimativas nutricionais realistas de uma porção padrão desse prato e o impacto esperado para o diabetes do paciente.
+
+Preencha todos os campos estruturados em conformidade com a refeição descrita.
+`;
     }
+
+    console.log(`[PROMPT ENVIADO]: ${promptText.trim().substring(0, 300)}...`);
 
     contents.push({ text: promptText });
 
@@ -333,22 +393,23 @@ Forneça os valores estimados para uma porção padrão desse prato e o impacto 
       model: "gemini-3.5-flash",
       contents: contents,
       config: {
+        systemInstruction: systemInstruction,
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.OBJECT,
           properties: {
-            foodName: { type: Type.STRING, description: "Nome identificado ou resumido do alimento/refeição." },
-            portionSize: { type: Type.STRING, description: "Porção de referência estimada (ex: 1 prato de 300g, 1 fatia)." },
+            foodName: { type: Type.STRING, description: "Nome exato e específico do prato identificado." },
+            portionSize: { type: Type.STRING, description: "Porção de referência estimada (ex: 1 prato de 300g)." },
             carbohydrates: { type: Type.NUMBER, description: "Gramas de carboidratos estimados." },
             sugar: { type: Type.NUMBER, description: "Gramas de açúcares simples estimados." },
             fiber: { type: Type.NUMBER, description: "Gramas de fibras estimadas." },
             protein: { type: Type.NUMBER, description: "Gramas de proteínas estimadas." },
             fats: { type: Type.NUMBER, description: "Gramas de gorduras estimadas." },
             calories: { type: Type.NUMBER, description: "Quantidade de calorias (kcal)." },
-            glycemicLoad: { type: Type.NUMBER, description: "Carga Glicêmica estimada da porção (de 1 a 30+)." },
+            glycemicLoad: { type: Type.NUMBER, description: "Carga Glicêmica estimada da porção." },
             glycemicIndexRating: { type: Type.STRING, description: "Classificação do índice glicêmico: 'baixo', 'medio' ou 'alto'." },
-            expectedImpact: { type: Type.STRING, description: "Impacto estimado na glicemia (ex: 'Moderado', 'Rápido', 'Muito Alto')." },
-            explanation: { type: Type.STRING, description: "Explicação nutricional empática contendo dicas práticas (ex: 'Adicione uma fibra ou salada antes de consumir para reduzir o pico')." }
+            expectedImpact: { type: Type.STRING, description: "Impacto esperado na glicemia (ex: 'Baixo', 'Moderado', 'Alto')." },
+            explanation: { type: Type.STRING, description: "Explicação detalhada que DEVE começar listando os alimentos identificados na imagem e depois fornecer conselhos práticos e nutricionais inteligentes." }
           },
           required: [
             "foodName",
@@ -369,6 +430,9 @@ Forneça os valores estimados para uma porção padrão desse prato e o impacto 
     });
 
     const resultText = response.text || "{}";
+    console.log(`[RESPOSTA RETORNADA DO GEMINI]: ${resultText.substring(0, 300)}...`);
+    console.log(`--- [FIM DEBUG ANALISADOR DE ALIMENTOS MULTIMODAL] ---\n`);
+
     res.json(JSON.parse(resultText));
   } catch (error: any) {
     console.error("Erro ao analisar refeição:", error);

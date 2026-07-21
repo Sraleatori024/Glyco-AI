@@ -58,10 +58,20 @@ export default function App() {
     return saved ? JSON.parse(saved) : null;
   });
   const [authChecking, setAuthChecking] = useState(true);
-  const [isPremium, setIsPremium] = useState<boolean>(() => localStorage.getItem("glyco_premium") === "true");
 
   // Application State
   const [profile, setProfile] = useState<UserProfile | null>(null);
+
+  const [isPremiumState, setIsPremiumState] = useState<boolean>(() => localStorage.getItem("glyco_premium") === "true");
+
+  const isPremium = isPremiumState || 
+                    (user && (user.email === "nickinicolas380@gmail.com" || user.email === "nickinicolas380@gmil.com")) || 
+                    profile?.plan === "premium" || 
+                    profile?.subscriptionPlan === "premium";
+
+  const setIsPremium = (val: boolean) => {
+    setIsPremiumState(val);
+  };
   const [glucoseLogs, setGlucoseLogs] = useState<GlucoseLog[]>([]);
   const [foodLogs, setFoodLogs] = useState<FoodLog[]>([]);
   const [medicationLogs, setMedicationLogs] = useState<MedicationLog[]>([]);
@@ -436,7 +446,7 @@ export default function App() {
     );
   }
 
-  const isAdmin = user.email === "nickinicolas380@gmail.com" || profile?.role === "admin";
+  const isAdmin = user.email === "nickinicolas380@gmail.com" || user.email === "nickinicolas380@gmil.com" || profile?.role === "admin";
 
   // Sidebar navigation configuration
   const navigationItems = [

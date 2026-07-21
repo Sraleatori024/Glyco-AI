@@ -31,6 +31,57 @@ function getGeminiClient() {
   return aiClient;
 }
 
+// Helper function to call Gemini API with automatic model fallbacks and retry with exponential backoff on transient errors (503, 429)
+async function generateContentWithRetry(params: {
+  contents: any;
+  config?: any;
+}) {
+  const ai = getGeminiClient();
+  const modelsToTry = ["gemini-3.6-flash", "gemini-3.5-flash"];
+  let lastError: any = null;
+
+  for (const modelName of modelsToTry) {
+    let delay = 1000;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        console.log(`[AI REQUEST] Tentativa ${attempt} usando modelo: ${modelName}`);
+        const response = await ai.models.generateContent({
+          model: modelName,
+          contents: params.contents,
+          config: params.config,
+        });
+        return response;
+      } catch (err: any) {
+        lastError = err;
+        console.warn(`[AI WARNING] Falha na tentativa ${attempt} com modelo ${modelName}. Erro:`, err.message || err);
+        
+        // Check if it's a transient/retryable error (503 UNAVAILABLE, 429 RATE LIMIT, or containing typical messages)
+        const errMsg = (err.message || "").toUpperCase();
+        const isTransient = 
+          err.status === "UNAVAILABLE" || 
+          err.statusCode === 503 || 
+          errMsg.includes("503") ||
+          errMsg.includes("UNAVAILABLE") ||
+          err.status === "RESOURCE_EXHAUSTED" || 
+          err.statusCode === 429 ||
+          errMsg.includes("429") ||
+          errMsg.includes("LIMIT");
+
+        if (isTransient && attempt < 3) {
+          console.log(`[AI RETRY] Erro temporário detectado. Aguardando ${delay}ms antes de tentar novamente...`);
+          await new Promise((resolve) => setTimeout(resolve, delay));
+          delay *= 2; // exponential backoff
+        } else {
+          // Break to try next model
+          break;
+        }
+      }
+    }
+  }
+
+  throw lastError || new Error("Falha ao gerar conteúdo com a API do Gemini após tentar múltiplos modelos.");
+}
+
 // 1. Endpoint for automatic trend & pattern analysis of patient's history
 app.post("/api/gemini/analyze-history", async (req: any, res: any) => {
   try {
@@ -81,8 +132,7 @@ ${JSON.stringify(exerciseLogs || [])}
 
 Retorne os resultados em um formato JSON estruturado para exibição fluida no dashboard.`;
 
-    const response = await ai.models.generateContent({
-      model: "gemini-3.5-flash",
+    const response = await generateContentWithRetry({
       contents: [
         { text: systemPrompt },
         { text: patientContext },
@@ -193,8 +243,7 @@ Tempo no alvo: ${currentStats?.timeInRange || "75"}%
       console.log(`[ÚLTIMA PERGUNTA DO USUÁRIO]: "${messages[messages.length - 1].text}"`);
     }
 
-    const response = await ai.models.generateContent({
-      model: "gemini-3.5-flash",
+    const response = await generateContentWithRetry({
       contents: chatContents,
       config: {
         systemInstruction: fullInstruction,
@@ -250,8 +299,7 @@ Com base nas seguintes atividades físicas em nossa biblioteca, monte um plano i
 Selecione os exercícios mais adequados para a idade de ${profile.age} anos e diabetes do tipo ${profile.diabetesType}.
 Retorne as informações em um formato JSON válido estruturado para renderização direta na interface.`;
 
-    const response = await ai.models.generateContent({
-      model: "gemini-3.5-flash",
+    const response = await generateContentWithRetry({
       contents: [
         { text: systemPrompt },
         { text: patientContext },
@@ -389,8 +437,7 @@ Preencha todos os campos estruturados em conformidade com a refeição descrita.
 
     contents.push({ text: promptText });
 
-    const response = await ai.models.generateContent({
-      model: "gemini-3.5-flash",
+    const response = await generateContentWithRetry({
       contents: contents,
       config: {
         systemInstruction: systemInstruction,

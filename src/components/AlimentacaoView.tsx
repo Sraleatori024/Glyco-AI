@@ -1,7 +1,7 @@
 import React, { useState, useRef } from "react";
 import { FoodLog, UserProfile, FoodNutrition } from "../types";
 import { motion, AnimatePresence } from "motion/react";
-import { Apple, Upload, Image, Send, RefreshCw, Sparkles, CheckCircle2, ChevronRight, HelpCircle, Flame } from "lucide-react";
+import { Apple, Upload, Image, Send, RefreshCw, Sparkles, CheckCircle2, ChevronRight, HelpCircle, Flame, Camera } from "lucide-react";
 
 interface AlimentacaoViewProps {
   logs: FoodLog[];
@@ -25,6 +25,7 @@ export default function AlimentacaoView({
   const [isDragging, setIsDragging] = useState(false);
   const [showPremiumPrompt, setShowPremiumPrompt] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
 
   // File Upload Handlers (Drag and Drop & Browse)
   const processFile = (file: File) => {
@@ -62,6 +63,12 @@ export default function AlimentacaoView({
     }
   };
 
+  const handleCameraChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      processFile(e.target.files[0]);
+    }
+  };
+
   // Run the full-stack Gemini analysis
   const handleAnalyze = async () => {
     if (!isPremium) {
@@ -87,27 +94,17 @@ export default function AlimentacaoView({
       });
 
       if (!response.ok) {
-        throw new Error("Erro na resposta da análise inteligente.");
+        throw new Error("Não foi possível analisar o alimento no momento.");
       }
 
       const result = await response.json();
+      if (result.error) {
+        throw new Error(result.error);
+      }
       setAnalysisResult(result);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Erro na análise nutricional:", error);
-      // Fallback fallback response
-      setAnalysisResult({
-        foodName: description || "Refeição Registrada",
-        portionSize: "Porção de 1 prato padrão",
-        carbohydrates: 42,
-        sugar: 4,
-        fiber: 5,
-        protein: 24,
-        calories: 380,
-        glycemicLoad: 15,
-        glycemicIndexRating: "medio",
-        expectedImpact: "Moderado",
-        explanation: "Refeição balanceada. O teor médio de carboidratos com fibras saudáveis retarda a absorção, sugerimos adicionar folhas verdes antes de consumir.",
-      });
+      alert(error.message || "Desculpe, ocorreu um erro ao realizar a análise multimodal da imagem. Por favor, tente novamente com outra foto.");
     } finally {
       setAnalyzing(false);
     }
@@ -164,18 +161,17 @@ export default function AlimentacaoView({
               />
             </div>
 
-            {/* Drag & Drop Photo Uploader */}
+            {/* Drag & Drop Photo Uploader with Explicit Camera and Gallery Triggers */}
             <div
               onDragOver={handleDragOver}
               onDragLeave={handleDragLeave}
               onDrop={handleDrop}
-              onClick={() => fileInputRef.current?.click()}
-              className={`border-2 border-dashed rounded-2xl p-6 text-center cursor-pointer transition-all flex flex-col items-center justify-center min-h-[160px] ${
+              className={`border-2 border-dashed rounded-2xl p-4 text-center transition-all flex flex-col justify-center min-h-[160px] ${
                 isDragging
                   ? "border-blue-500 bg-blue-50/50"
                   : base64Image
                   ? "border-emerald-400 bg-emerald-50/10"
-                  : "border-neutral-200 bg-neutral-50 hover:bg-neutral-100/50"
+                  : "border-neutral-200 bg-neutral-50"
               }`}
             >
               <input
@@ -185,29 +181,63 @@ export default function AlimentacaoView({
                 accept="image/*"
                 className="hidden"
               />
+              <input
+                type="file"
+                ref={cameraInputRef}
+                onChange={handleCameraChange}
+                accept="image/*"
+                capture="environment"
+                className="hidden"
+              />
 
               {base64Image ? (
-                <div className="space-y-2">
-                  <div className="relative w-24 h-24 mx-auto rounded-xl overflow-hidden border border-neutral-200 shadow-3xs">
+                <div className="space-y-3 py-2">
+                  <div className="relative w-28 h-28 mx-auto rounded-xl overflow-hidden border border-neutral-200 shadow-sm">
                     <img src={base64Image} alt="Refeição" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                   </div>
-                  <span className="text-xs font-semibold text-emerald-700 block">Foto selecionada!</span>
+                  <div>
+                    <span className="text-xs font-bold text-emerald-700 block">Foto selecionada para análise!</span>
+                    <p className="text-[10px] text-neutral-400">O Gemini analisará os ingredientes reais desta foto.</p>
+                  </div>
                   <button
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
                       setBase64Image(null);
                     }}
-                    className="text-xxs font-bold text-red-500 hover:underline"
+                    className="px-3 py-1 bg-white hover:bg-neutral-100 text-red-500 hover:text-red-600 rounded-lg text-xxs font-extrabold border border-neutral-200 transition-all cursor-pointer"
                   >
-                    Remover foto
+                    Remover e Tirar Outra
                   </button>
                 </div>
               ) : (
-                <div className="space-y-1">
-                  <Upload className="w-8 h-8 text-neutral-400 mx-auto" />
-                  <p className="text-xs font-semibold text-neutral-700">Arraste ou clique para enviar foto</p>
-                  <p className="text-xxs text-neutral-400 font-medium">Melhora a precisão na detecção do prato</p>
+                <div className="space-y-4">
+                  <div className="text-center">
+                    <p className="text-xs font-bold text-neutral-600 uppercase tracking-wider">Como deseja enviar a foto?</p>
+                    <p className="text-xxs text-neutral-400 mt-0.5">Tire uma foto ou carregue da galeria</p>
+                  </div>
+                  
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => cameraInputRef.current?.click()}
+                      className="p-3 border border-neutral-200/80 bg-white hover:bg-neutral-50 rounded-xl flex flex-col items-center justify-center text-center gap-1.5 cursor-pointer transition-all hover:scale-[1.02] active:scale-[0.98]"
+                    >
+                      <Camera className="w-5 h-5 text-blue-600" />
+                      <span className="text-[11px] font-bold text-neutral-800">Tirar Foto</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      className="p-3 border border-neutral-200/80 bg-white hover:bg-neutral-50 rounded-xl flex flex-col items-center justify-center text-center gap-1.5 cursor-pointer transition-all hover:scale-[1.02] active:scale-[0.98]"
+                    >
+                      <Image className="w-5 h-5 text-emerald-600" />
+                      <span className="text-[11px] font-bold text-neutral-800">Galeria</span>
+                    </button>
+                  </div>
+
+                  <p className="text-[10px] text-neutral-400">Arraste a foto diretamente aqui se preferir</p>
                 </div>
               )}
             </div>

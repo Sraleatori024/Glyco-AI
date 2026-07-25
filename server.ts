@@ -358,10 +358,23 @@ app.post("/api/gemini/analyze-food", async (req: any, res: any) => {
 
     if (!foodDescription && !base64Image) {
       console.warn("[AVISO]: Descrição do alimento e imagem estão ausentes.");
-      return res.status(400).json({ error: "Forneça uma descrição do alimento ou uma foto." });
+      return res.status(400).json({
+        error: "Dados de Entrada Ausentes",
+        message: "Forneça uma descrição do alimento ou selecione uma foto da refeição.",
+        source: "Validação de Entrada (Servidor)",
+        statusCode: 400
+      });
     }
 
-    const ai = getGeminiClient();
+    if (!process.env.GEMINI_API_KEY) {
+      console.error("[ERRO GRAVE]: GEMINI_API_KEY não configurada no ambiente!");
+      return res.status(500).json({
+        error: "Chave de API do Gemini Não Configurada",
+        message: "A chave de API GEMINI_API_KEY não foi configurada no servidor.",
+        source: "Configuração do Servidor (Variáveis de Ambiente)",
+        statusCode: 500
+      });
+    }
 
     const systemPrompt = `Você é um nutricionista especialista em diabetes, contagem de carboidratos e IA nutricional multimodal.
 Sua tarefa é analisar a imagem fornecida (ou a descrição em texto) e identificar visualmente TODOS os alimentos presentes no prato de forma exata e fiel à foto real recebida.
@@ -386,12 +399,16 @@ Usa Insulina? ${profile?.usesInsulin ? "Sim" : "Não"}
       const mimeType = parts[0]?.split(":")[1] || "image/jpeg";
       const cleanBase64 = parts[1];
 
-      if (!cleanBase64) {
-        throw new Error("Dados da imagem inválidos ou formato Base64 incorreto.");
+      if (!cleanBase64 || cleanBase64.length < 50) {
+        return res.status(400).json({
+          error: "Formato de Imagem Inválido",
+          message: "A foto enviada possui formato Base64 corrompido ou incompleto.",
+          source: "Processamento de Imagem (Servidor)",
+          statusCode: 400
+        });
       }
 
       console.log(`[DADOS DA IMAGEM]: Imagem recebida no backend. MimeType: "${mimeType}", Comprimento Base64: ${cleanBase64.length} caracteres.`);
-      console.log(`[CONFIRMAÇÃO]: A imagem foi decodificada com sucesso no backend.`);
 
       partsList.push({
         inlineData: {
@@ -446,13 +463,10 @@ Preencha todos os campos estruturados em conformidade com a refeição descrita.
 
     partsList.push({ text: promptText });
 
-    // Correct Gemini Content structure wrapping parts in a 'parts' property
     const requestContents = {
       parts: partsList
     };
 
-    console.log(`[CHAVE DE API CONFIGURADA]: ${process.env.GEMINI_API_KEY ? "Sim (Inicia com " + process.env.GEMINI_API_KEY.substring(0, 5) + "...)" : "Não"}`);
-    
     const response = await generateContentWithRetry({
       contents: requestContents,
       config: {
@@ -494,32 +508,72 @@ Preencha todos os campos estruturados em conformidade com a refeição descrita.
 
     const duration = Date.now() - startTime;
     const resultText = response.text || "{}";
-    
+    const parsedResult = JSON.parse(resultText);
+
+    // Validate whether Gemini was able to recognize a food item
+    const fnLower = (parsedResult.foodName || "").toLowerCase();
+    const expLower = (parsedResult.explanation || "").toLowerCase();
+
+    const isUnrecognized = 
+      fnLower.includes("nenhum alimento") || 
+      fnLower.includes("não foi possível") || 
+      fnLower.includes("desconhecido") || 
+      fnLower.includes("não identificado") ||
+      fnLower.includes("imagem não identificada") ||
+      (parsedResult.carbohydrates === 0 && parsedResult.protein === 0 && parsedResult.fats === 0 && (expLower.includes("nenhum alimento") || expLower.includes("não foi possível") || expLower.includes("sem alimentos")));
+
+    if (isUnrecognized && base64Image) {
+      console.warn(`[FALHA DE RECONHECIMENTO]: A foto foi processada, mas nenhum alimento foi reconhecido na imagem.`);
+      return res.status(422).json({
+        error: "Foto Não Reconhecida",
+        message: "A Inteligência Artificial não conseguiu identificar nenhum alimento visível nesta imagem. Por favor, envie uma foto clara, bem iluminada e focada no prato de comida.",
+        source: "Inteligência Artificial (Reconhecimento Visual Gemini)",
+        statusCode: 422,
+        details: parsedResult.explanation
+      });
+    }
+
     console.log(`[TEMPO DA REQUISIÇÃO]: ${duration}ms`);
     console.log(`[RESPOSTA RETORNADA DO GEMINI]:\n${resultText}\n`);
     console.log(`--- [FIM SUCESSO ANALISADOR DE ALIMENTOS MULTIMODAL] ---\n`);
 
-    res.json(JSON.parse(resultText));
+    res.json(parsedResult);
   } catch (error: any) {
     const elapsedTime = Date.now() - startTime;
-    
+    const errMsg = String(error.message || error);
+
+    let source = "Servidor Backend";
+    let statusCode = error.status || error.statusCode || 500;
+
+    if (errMsg.includes("413") || errMsg.includes("Payload Too Large") || error.type === "entity.too.large") {
+      source = "Servidor (Tamanho da Imagem Excede o Limite)";
+      statusCode = 413;
+    } else if (errMsg.includes("503") || errMsg.includes("UNAVAILABLE") || errMsg.includes("429") || errMsg.includes("Quota") || errMsg.includes("RATE_LIMIT")) {
+      source = "API do Gemini (Limite de Cota de Requisições / Serviço Indisponível Temporariamente)";
+      statusCode = 503;
+    } else if (errMsg.includes("API key") || errMsg.includes("API_KEY") || errMsg.includes("unauthorized") || errMsg.includes("403")) {
+      source = "API do Gemini (Chave de API Inválida ou Não Configurada)";
+      statusCode = 403;
+    } else if (errMsg.includes("Base64") || errMsg.includes("image") || errMsg.includes("canvas")) {
+      source = "Processamento de Imagem no Servidor";
+      statusCode = 400;
+    }
+
     console.error(`\n================= ERRO GRAVE NO ANALISADOR MULTIMODAL =================`);
     console.error(`[TEMPO ATÉ FALHAR]: ${elapsedTime}ms`);
-    console.error(`[MENSAGEM DE ERRO]: ${error.message || error}`);
-    console.error(`[STATUS HTTP / CÓDIGO]: ${error.status || error.statusCode || 500}`);
-    console.error(`[MODELO CONFIGURADO]: gemini-3.6-flash / gemini-3.5-flash`);
-    console.log(`[CHAVE DE API VÁLIDA?]: ${process.env.GEMINI_API_KEY ? "Sim" : "Não (FALTA CONFIGURAR)"}`);
+    console.error(`[MENSAGEM DE ERRO]: ${errMsg}`);
+    console.error(`[FONTE IDENTIFICADA]: ${source}`);
+    console.error(`[STATUS HTTP / CÓDIGO]: ${statusCode}`);
     console.error(`[STACK TRACE]:\n${error.stack}\n`);
     console.error(`========================================================================\n`);
 
-    res.status(500).json({
-      error: "Falha na análise nutricional do Gemini.",
-      message: error.message || String(error),
-      statusCode: error.status || error.statusCode || 500,
+    res.status(statusCode).json({
+      error: "Falha na Análise da Foto / Refeição",
+      message: errMsg,
+      source: source,
+      statusCode: statusCode,
       elapsedTimeMs: elapsedTime,
-      stack: error.stack,
-      promptSent: foodDescription || "Imagem multimodal",
-      modelUsed: "gemini-3.6-flash / gemini-3.5-flash"
+      details: error.stack || String(error)
     });
   }
 });

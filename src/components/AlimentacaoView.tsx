@@ -1,7 +1,7 @@
 import React, { useState, useRef } from "react";
 import { FoodLog, UserProfile, FoodNutrition } from "../types";
 import { motion, AnimatePresence } from "motion/react";
-import { Apple, Upload, Image, Send, RefreshCw, Sparkles, CheckCircle2, ChevronRight, HelpCircle, Flame, Camera } from "lucide-react";
+import { Apple, Upload, Image, Send, RefreshCw, Sparkles, CheckCircle2, ChevronRight, HelpCircle, Flame, Camera, AlertTriangle, X, AlertCircle, ShieldAlert } from "lucide-react";
 
 interface AlimentacaoViewProps {
   logs: FoodLog[];
@@ -22,6 +22,13 @@ export default function AlimentacaoView({
   const [base64Image, setBase64Image] = useState<string | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState<FoodNutrition | null>(null);
+  const [analysisError, setAnalysisError] = useState<{
+    title: string;
+    source: string;
+    message: string;
+    statusCode?: number;
+    details?: string;
+  } | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [showPremiumPrompt, setShowPremiumPrompt] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -87,6 +94,7 @@ export default function AlimentacaoView({
     }
 
     try {
+      setAnalysisError(null);
       // Compress and resize the image before saving to state
       const compressedDataUrl = await resizeAndCompressImage(file);
       setBase64Image(compressedDataUrl);
@@ -96,6 +104,7 @@ export default function AlimentacaoView({
       const reader = new FileReader();
       reader.onload = () => {
         setBase64Image(reader.result as string);
+        setAnalysisError(null);
       };
       reader.readAsDataURL(file);
     }
@@ -138,11 +147,18 @@ export default function AlimentacaoView({
     }
 
     if (!description.trim() && !base64Image) {
-      alert("Escreva a descrição da refeição ou adicione uma foto.");
+      setAnalysisError({
+        title: "Dados Insuficientes",
+        source: "Validação da Interface",
+        message: "Por favor, digite o que você comeu ou adicione uma foto da sua refeição antes de analisar.",
+      });
       return;
     }
 
+    setAnalysisError(null);
+    setAnalysisResult(null);
     setAnalyzing(true);
+
     try {
       const response = await fetch("/api/gemini/analyze-food", {
         method: "POST",
@@ -155,35 +171,55 @@ export default function AlimentacaoView({
       });
 
       if (!response.ok) {
-        let errorMsg = "Não foi possível analisar o alimento no momento.";
+        let title = "Falha na Análise da Imagem";
+        let source = "Servidor / API Gemini";
+        let message = "Não foi possível analisar a imagem enviada.";
+        let details: string | undefined = undefined;
+        let statusCode = response.status;
+
         try {
           const errData = await response.json();
-          errorMsg = errData.message || errData.error || errorMsg;
-          if (errData.statusCode) {
-            errorMsg += ` (Status: ${errData.statusCode})`;
-          }
-          if (errData.elapsedTimeMs) {
-            errorMsg += ` [Tempo: ${errData.elapsedTimeMs}ms]`;
-          }
+          title = errData.error || title;
+          source = errData.source || source;
+          message = errData.message || message;
+          details = errData.details;
+          if (errData.statusCode) statusCode = errData.statusCode;
         } catch {
           try {
             const txt = await response.text();
-            if (txt) {
-              errorMsg += ` - ${txt.substring(0, 150)}`;
-            }
+            if (txt) details = txt;
           } catch (_) {}
         }
-        throw new Error(errorMsg);
+
+        setAnalysisError({
+          title,
+          source,
+          message,
+          statusCode,
+          details
+        });
+        return;
       }
 
       const result = await response.json();
-      if (result.error) {
-        throw new Error(result.error);
-      }
       setAnalysisResult(result);
     } catch (error: any) {
       console.error("Erro na análise nutricional:", error);
-      alert(error.message || "Desculpe, ocorreu um erro ao realizar a análise multimodal da imagem. Por favor, tente novamente com outra foto.");
+      let title = "Erro de Conexão com o Servidor";
+      let source = "Rede / Conexão do Cliente";
+      let message = error.message || "Ocorreu uma falha ao enviar a imagem para análise.";
+
+      if (error instanceof TypeError && error.message.includes("fetch")) {
+        source = "Servidor / Desconectado";
+        message = "Não foi possível conectar ao servidor backend da aplicação. Verifique se o servidor está rodando e sua conexão de internet.";
+      }
+
+      setAnalysisError({
+        title,
+        source,
+        message,
+        details: String(error)
+      });
     } finally {
       setAnalyzing(false);
     }
@@ -357,8 +393,88 @@ export default function AlimentacaoView({
       {/* Right panel: Live results & Recent History */}
       <div className="lg:col-span-2 space-y-6">
         <AnimatePresence mode="wait">
-          {/* Active AI Analysis Result Card */}
-          {analysisResult ? (
+          {/* Active Error Card */}
+          {analysisError ? (
+            <motion.div
+              key="error"
+              initial={{ opacity: 0, y: 15 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -15 }}
+              className="bg-rose-50/90 p-6 rounded-3xl border-2 border-rose-300 shadow-md space-y-4"
+            >
+              <div className="flex items-start justify-between border-b border-rose-200/80 pb-4">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 bg-rose-100 rounded-2xl text-rose-600">
+                    <AlertTriangle className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <span className="text-xxs font-extrabold text-rose-700 uppercase tracking-widest block">
+                      {analysisError.title || "Falha ao Analisar Refeição"}
+                    </span>
+                    <h3 className="text-base font-bold text-rose-950 mt-0.5">
+                      Não foi possível identificar o alimento na imagem
+                    </h3>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setAnalysisError(null)}
+                  className="text-rose-400 hover:text-rose-700 p-1.5 rounded-lg hover:bg-rose-100/50 transition-all cursor-pointer"
+                  title="Fechar mensagem de erro"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Origin Badge */}
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xxs font-bold text-rose-800 uppercase tracking-wider">Origem do Erro:</span>
+                <span className="px-2.5 py-1 bg-white border border-rose-200 text-rose-900 rounded-lg text-xs font-semibold shadow-2xs">
+                  {analysisError.source}
+                </span>
+                {analysisError.statusCode && (
+                  <span className="px-2.5 py-1 bg-rose-100 text-rose-900 rounded-lg text-xs font-bold">
+                    Status HTTP {analysisError.statusCode}
+                  </span>
+                )}
+              </div>
+
+              {/* Message Body */}
+              <div className="bg-white/80 p-4 rounded-2xl border border-rose-200/60 text-sm text-rose-900 leading-relaxed font-medium">
+                {analysisError.message}
+              </div>
+
+              {/* Tech Details if present */}
+              {analysisError.details && (
+                <div className="text-xs text-rose-800/80 bg-rose-100/60 p-3 rounded-xl font-mono overflow-x-auto max-h-32 text-xxs">
+                  <span className="font-bold block mb-1 uppercase tracking-wider text-[10px] text-rose-900">Detalhes Técnicos do Diagnóstico:</span>
+                  {analysisError.details}
+                </div>
+              )}
+
+              {/* Action Buttons */}
+              <div className="flex flex-wrap gap-3 pt-2">
+                <button
+                  onClick={() => {
+                    setAnalysisError(null);
+                    handleAnalyze();
+                  }}
+                  className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold shadow-xs transition-all flex items-center gap-1.5 cursor-pointer"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  Tentar Novamente
+                </button>
+                <button
+                  onClick={() => {
+                    setAnalysisError(null);
+                    setBase64Image(null);
+                  }}
+                  className="px-4 py-2 bg-white hover:bg-rose-100/60 text-rose-700 border border-rose-200 rounded-xl text-xs font-bold transition-all cursor-pointer"
+                >
+                  Remover Foto e Selecionar Outra
+                </button>
+              </div>
+            </motion.div>
+          ) : analysisResult ? (
             <motion.div
               key="result"
               initial={{ opacity: 0, y: 15 }}

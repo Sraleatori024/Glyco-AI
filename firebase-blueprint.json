@@ -84,6 +84,24 @@
       },
       "required": ["id", "uid", "name", "dosage", "status", "timestamp"]
     },
+    "InsulinLog": {
+      "title": "InsulinLog",
+      "description": "Insulin application log entry.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "uid": { "type": "string" },
+        "type": { "type": "string", "enum": ["ultrarrapida", "rapida", "nph", "lenta_basal"] },
+        "customName": { "type": "string" },
+        "doseUnits": { "type": "number" },
+        "timeScheduled": { "type": "string" },
+        "applicationSite": { "type": "string" },
+        "status": { "type": "string", "enum": ["aplicado", "pendente", "atrasado"] },
+        "notes": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "uid", "type", "doseUnits", "status"]
+    },
     "ExerciseLog": {
       "title": "ExerciseLog",
       "description": "Physical activity log.",
@@ -145,6 +163,10 @@
     "/medications/{medId}": {
       "schema": "MedicationLog",
       "description": "Stores logged medicine and insulin intake logs."
+    },
+    "/insulin_records/{insulinId}": {
+      "schema": "InsulinLog",
+      "description": "Stores logged insulin applications."
     },
     "/exercise_history/{exId}": {
       "schema": "ExerciseLog",

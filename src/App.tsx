@@ -8,12 +8,14 @@ import {
   GlucoseLog,
   FoodLog,
   MedicationLog,
+  InsulinLog,
   ExerciseLog,
   Message,
   INITIAL_PROFILE,
   INITIAL_GLUCOSE_LOGS,
   INITIAL_FOOD_LOGS,
   INITIAL_MEDICATION_LOGS,
+  INITIAL_INSULIN_LOGS,
   INITIAL_EXERCISE_LOGS,
   INITIAL_CHAT_MESSAGES
 } from "./types";
@@ -75,6 +77,7 @@ export default function App() {
   const [glucoseLogs, setGlucoseLogs] = useState<GlucoseLog[]>([]);
   const [foodLogs, setFoodLogs] = useState<FoodLog[]>([]);
   const [medicationLogs, setMedicationLogs] = useState<MedicationLog[]>([]);
+  const [insulinLogs, setInsulinLogs] = useState<InsulinLog[]>([]);
   const [exerciseLogs, setExerciseLogs] = useState<ExerciseLog[]>([]);
   const [chatMessages, setChatMessages] = useState<Message[]>([]);
   
@@ -162,6 +165,21 @@ export default function App() {
           setMedicationLogs(saved ? JSON.parse(saved) : INITIAL_MEDICATION_LOGS);
         }
 
+        // 4b. Fetch insulin logs (top-level collection: insulin_records)
+        try {
+          const q = query(collection(db, "insulin_records"), where("uid", "==", firebaseUser.uid));
+          const insulinSnap = await getDocs(q);
+          if (!insulinSnap.empty) {
+            setInsulinLogs(insulinSnap.docs.map((d) => ({ id: d.id, ...d.data() } as InsulinLog)));
+          } else {
+            setInsulinLogs(INITIAL_INSULIN_LOGS);
+          }
+        } catch (err) {
+          console.error("Error loading insulin logs from Firestore:", err);
+          const saved = localStorage.getItem("glyco_insulin");
+          setInsulinLogs(saved ? JSON.parse(saved) : INITIAL_INSULIN_LOGS);
+        }
+
         // 5. Fetch exercise logs (top-level collection: exercise_history)
         try {
           const q = query(collection(db, "exercise_history"), where("uid", "==", firebaseUser.uid));
@@ -240,6 +258,11 @@ export default function App() {
   const saveMeds = (logs: MedicationLog[]) => {
     setMedicationLogs(logs);
     localStorage.setItem("glyco_meds", JSON.stringify(logs));
+  };
+
+  const saveInsulin = (logs: InsulinLog[]) => {
+    setInsulinLogs(logs);
+    localStorage.setItem("glyco_insulin", JSON.stringify(logs));
   };
 
   const saveExercises = (logs: ExerciseLog[]) => {
@@ -322,6 +345,46 @@ export default function App() {
     saveMeds(updated);
     if (user) {
       await deleteDocFromFirestore("meds", id);
+    }
+  };
+
+  const handleAddInsulinLog = async (newInsulin: Omit<InsulinLog, "id" | "status">) => {
+    const ins: InsulinLog = {
+      ...newInsulin,
+      id: Math.random().toString(36).substr(2, 9),
+      status: "pendente",
+    };
+    const updated = [...insulinLogs, ins];
+    saveInsulin(updated);
+    if (user) {
+      await syncDocToFirestore("insulin", ins.id, ins);
+    }
+  };
+
+  const handleToggleInsulinStatus = async (id: string) => {
+    const updated = insulinLogs.map((i) => {
+      if (i.id === id) {
+        const nextStatus = i.status === "aplicado" ? "pendente" : "aplicado";
+        return {
+          ...i,
+          status: nextStatus as any,
+          timestamp: nextStatus === "aplicado" ? new Date().toISOString() : undefined,
+        };
+      }
+      return i;
+    });
+    saveInsulin(updated);
+    const target = updated.find((i) => i.id === id);
+    if (user && target) {
+      await syncDocToFirestore("insulin", id, target);
+    }
+  };
+
+  const handleDeleteInsulinLog = async (id: string) => {
+    const updated = insulinLogs.filter((i) => i.id !== id);
+    saveInsulin(updated);
+    if (user) {
+      await deleteDocFromFirestore("insulin", id);
     }
   };
 
@@ -623,6 +686,7 @@ export default function App() {
               glucoseLogs={glucoseLogs}
               foodLogs={foodLogs}
               medicationLogs={medicationLogs}
+              insulinLogs={insulinLogs}
               exerciseLogs={exerciseLogs}
               onNavigate={(view) => setCurrentView(view)}
             />
@@ -655,6 +719,10 @@ export default function App() {
               onAddLog={handleAddMedicationLog}
               onToggleStatus={handleToggleMedicationStatus}
               onDeleteLog={handleDeleteMedicationLog}
+              insulinLogs={insulinLogs}
+              onAddInsulinLog={handleAddInsulinLog}
+              onToggleInsulinStatus={handleToggleInsulinStatus}
+              onDeleteInsulinLog={handleDeleteInsulinLog}
             />
           )}
 
@@ -691,6 +759,7 @@ export default function App() {
               glucoseLogs={glucoseLogs}
               foodLogs={foodLogs}
               medicationLogs={medicationLogs}
+              insulinLogs={insulinLogs}
               exerciseLogs={exerciseLogs}
               isPremium={isPremium}
               onNavigateToSubscription={() => setCurrentView("subscription")}

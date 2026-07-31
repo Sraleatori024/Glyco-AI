@@ -57,6 +57,8 @@ export function mapCollectionName(collectionName: string): string {
       return "meals";
     case "meds":
       return "medications";
+    case "insulin":
+      return "insulin_records";
     case "exercises":
       return "exercise_history";
     case "chat":

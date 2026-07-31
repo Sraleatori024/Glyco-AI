@@ -63,6 +63,21 @@ export interface MedicationLog {
   timeScheduled: string; // e.g. "08:00"
   timestamp?: string; // when actually applied
   status: "aplicado" | "pendente" | "atrasado";
+  notes?: string;
+}
+
+export type InsulinType = "ultrarrapida" | "rapida" | "nph" | "lenta_basal";
+
+export interface InsulinLog {
+  id: string;
+  type: InsulinType;
+  customName?: string; // e.g. "Lantus", "Humalog", "Tresiba", "Novorap"
+  doseUnits: number; // in UI
+  timeScheduled: string; // e.g. "22:00"
+  timestamp?: string;
+  applicationSite?: "abdomen" | "coxa" | "braco" | "gluteo" | "outros";
+  status: "aplicado" | "pendente" | "atrasado";
+  notes?: string;
 }
 
 export type ExerciseType = "caminhada" | "corrida" | "musculacao" | "pedalar" | "natacao" | "outros";
@@ -178,7 +193,11 @@ export const INITIAL_FOOD_LOGS: FoodLog[] = [
 export const INITIAL_MEDICATION_LOGS: MedicationLog[] = [
   { id: "m1", name: "Metformina 850mg", dose: "1 comprimido", timeScheduled: "08:00", status: "aplicado", timestamp: "2026-07-19T08:05:00-03:00" },
   { id: "m2", name: "Metformina 850mg", dose: "1 comprimido", timeScheduled: "20:00", status: "pendente" },
-  { id: "m3", name: "Insulina Glargina", dose: "14 UI", timeScheduled: "22:00", status: "pendente" },
+];
+
+export const INITIAL_INSULIN_LOGS: InsulinLog[] = [
+  { id: "i1", type: "lenta_basal", customName: "Insulina Glargina (Lantus)", doseUnits: 14, timeScheduled: "22:00", applicationSite: "coxa", status: "pendente", notes: "Aplicação noturna diária" },
+  { id: "i2", type: "ultrarrapida", customName: "Insulina Lispro (Humalog)", doseUnits: 4, timeScheduled: "12:30", applicationSite: "abdomen", status: "aplicado", timestamp: "2026-07-19T12:35:00-03:00", notes: "Bolus de refeição" },
 ];
 
 export const INITIAL_EXERCISE_LOGS: ExerciseLog[] = [

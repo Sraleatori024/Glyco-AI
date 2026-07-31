@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { UserProfile, GlucoseLog, FoodLog, MedicationLog, ExerciseLog, AIAnalysisResult } from "../types";
+import { UserProfile, GlucoseLog, FoodLog, MedicationLog, InsulinLog, ExerciseLog, AIAnalysisResult } from "../types";
 import { motion } from "motion/react";
 import {
   LineChart,
@@ -34,6 +34,7 @@ interface DashboardViewProps {
   glucoseLogs: GlucoseLog[];
   foodLogs: FoodLog[];
   medicationLogs: MedicationLog[];
+  insulinLogs?: InsulinLog[];
   exerciseLogs: ExerciseLog[];
   onNavigate: (view: string) => void;
 }
@@ -43,6 +44,7 @@ export default function DashboardView({
   glucoseLogs,
   foodLogs,
   medicationLogs,
+  insulinLogs = [],
   exerciseLogs,
   onNavigate,
 }: DashboardViewProps) {
@@ -75,9 +77,27 @@ export default function DashboardView({
 
   const timeInRange = calculateTimeInRange();
 
-  // Find next scheduled pending medication
+  // Calculate 7-day and 30-day averages
+  const now = new Date();
+  const logs7d = glucoseLogs.filter((l) => (now.getTime() - new Date(l.timestamp).getTime()) <= 7 * 86400 * 1000);
+  const logs30d = glucoseLogs.filter((l) => (now.getTime() - new Date(l.timestamp).getTime()) <= 30 * 86400 * 1000);
+
+  const average7d = logs7d.length > 0 ? Math.round(logs7d.reduce((a, b) => a + b.value, 0) / logs7d.length) : averageGlucose;
+  const average30d = logs30d.length > 0 ? Math.round(logs30d.reduce((a, b) => a + b.value, 0) / logs30d.length) : averageGlucose;
+
+  // Find next scheduled pending medication & insulin
   const pendingMeds = medicationLogs.filter((m) => m.status === "pendente");
   const nextMedication = pendingMeds.length > 0 ? pendingMeds[0] : null;
+
+  const pendingInsulin = insulinLogs.filter((i) => i.status === "pendente");
+  const nextInsulin = pendingInsulin.length > 0 ? pendingInsulin[0] : null;
+
+  // Next meal suggestion / schedule
+  const nextMealTime = "12:30 - Almoço";
+  const lastFood = foodLogs.length > 0 ? foodLogs[foodLogs.length - 1] : null;
+
+  // Next exercise suggestion / schedule
+  const lastExercise = exerciseLogs.length > 0 ? exerciseLogs[exerciseLogs.length - 1] : null;
 
   // Filter glucose logs based on range for chart
   const getFilteredLogsForChart = () => {

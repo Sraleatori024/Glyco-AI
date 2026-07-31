@@ -68,6 +68,19 @@ service cloud.firestore {
              data.timestamp is string && data.timestamp.size() <= 100;
     }
 
+    function isValidInsulin(data) {
+      return data.id is string && data.id.size() <= 128 &&
+             data.uid is string && data.uid == request.auth.uid &&
+             data.type is string && (data.type in ['ultrarrapida', 'rapida', 'nph', 'lenta_basal']) &&
+             data.doseUnits is number && data.doseUnits >= 0 &&
+             data.status is string && (data.status in ['aplicado', 'pendente', 'atrasado']) &&
+             (!('timeScheduled' in data) || (data.timeScheduled is string && data.timeScheduled.size() <= 50)) &&
+             (!('customName' in data) || (data.customName is string && data.customName.size() <= 200)) &&
+             (!('applicationSite' in data) || (data.applicationSite is string && data.applicationSite.size() <= 50)) &&
+             (!('notes' in data) || (data.notes is string && data.notes.size() <= 1000)) &&
+             (!('timestamp' in data) || (data.timestamp is string && data.timestamp.size() <= 100));
+    }
+
     function isValidExercise(data) {
       return data.id is string && data.id.size() <= 128 &&
              data.uid is string && data.uid == request.auth.uid &&
@@ -148,6 +161,15 @@ service cloud.firestore {
       allow list: if isSignedIn() && (resource.data.uid == request.auth.uid || isAdmin());
       allow create: if isSignedIn() && isValidId(medId) && isValidMedication(request.resource.data);
       allow update: if isSignedIn() && isValidId(medId) && isValidMedication(request.resource.data) && (resource.data.uid == request.auth.uid || isAdmin());
+      allow delete: if isSignedIn() && (resource.data.uid == request.auth.uid || isAdmin());
+    }
+
+    // Insulin logs entries
+    match /insulin_records/{insulinId} {
+      allow get: if isSignedIn() && (resource.data.uid == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.uid == request.auth.uid || isAdmin());
+      allow create: if isSignedIn() && isValidId(insulinId) && isValidInsulin(request.resource.data);
+      allow update: if isSignedIn() && isValidId(insulinId) && isValidInsulin(request.resource.data) && (resource.data.uid == request.auth.uid || isAdmin());
       allow delete: if isSignedIn() && (resource.data.uid == request.auth.uid || isAdmin());
     }
 

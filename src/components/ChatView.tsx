@@ -79,16 +79,22 @@ export default function ChatView({
       });
 
       if (!response.ok) {
-        throw new Error("Falha ao comunicar com assistente virtual.");
+        let errorMsg = "Falha ao comunicar com assistente virtual.";
+        try {
+          const errData = await response.json();
+          if (errData.message) errorMsg = errData.message;
+        } catch (_) {}
+        throw new Error(errorMsg);
       }
 
       const data = await response.json();
       onReceiveAssistantMessage(data.text);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Erro no chat inteligente:", error);
-      onReceiveAssistantMessage(
-        "Olá! Tive um pequeno problema ao conectar com meu cérebro inteligente, mas posso te adiantar o seguinte: Para um controle ótimo, evite picos e meça a glicemia com frequência. Como posso te ajudar a reestruturar sua próxima refeição?"
-      );
+      const userFacingMsg = error.message && error.message.includes("GEMINI_API_KEY") 
+        ? "Nota do Sistema: A chave GEMINI_API_KEY precisa ser adicionada nas variáveis de ambiente da Vercel (Project Settings > Environment Variables)."
+        : "Olá! Tive um pequeno problema ao conectar com meu cérebro inteligente, mas posso te adiantar o seguinte: Para um controle ótimo, evite picos e meça a glicemia com frequência. Como posso te ajudar a reestruturar sua próxima refeição?";
+      onReceiveAssistantMessage(userFacingMsg);
     } finally {
       setLoading(false);
     }

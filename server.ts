@@ -9,16 +9,39 @@ dotenv.config();
 const app = express();
 const PORT = 3000;
 
+// Enable CORS for all origins - critical for mobile browsers & WebViews on Vercel
+app.use((req, res, next) => {
+  res.header("Access-Control-Allow-Origin", "*");
+  res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+  res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization");
+  if (req.method === "OPTIONS") {
+    return res.status(200).end();
+  }
+  next();
+});
+
+// Configure JSON payload limit (up to 25MB for mobile photo uploads)
 app.use(express.json({ limit: "25mb" }));
+app.use(express.urlencoded({ limit: "25mb", extended: true }));
 
 let aiClient: any = null;
 
 function getGeminiClient() {
+  const key = process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY;
+  if (!key) {
+    console.error("==========================================================");
+    console.error("[ERRO GRAVE DE CONFIGURAÇÃO - VERCEL / SERVIDOR]");
+    console.error("A variável de ambiente GEMINI_API_KEY não foi encontrada!");
+    console.error("Para corrigir no Vercel:");
+    console.error("1. Acesse o painel do seu projeto na Vercel");
+    console.error("2. Vá em Settings > Environment Variables");
+    console.error("3. Adicione a chave GEMINI_API_KEY com a sua API Key do Google AI Studio");
+    console.error("==========================================================");
+    throw new Error("A chave GEMINI_API_KEY não está configurada no ambiente do Vercel. Por favor, adicione GEMINI_API_KEY no painel da Vercel em Project Settings > Environment Variables.");
+  }
+
   if (!aiClient) {
-    const key = process.env.GEMINI_API_KEY;
-    if (!key) {
-      throw new Error("GEMINI_API_KEY is not configured in the environment.");
-    }
+    console.log(`[GEMINI INIT]: Inicializando SDK do Gemini. Chave configurada (Comprimento: ${key.length}, Prefixo: ${key.substring(0, 6)}...)`);
     aiClient = new GoogleGenAI({
       apiKey: key,
       httpOptions: {
@@ -31,7 +54,7 @@ function getGeminiClient() {
   return aiClient;
 }
 
-// Helper function to call Gemini API with automatic model fallbacks and retry with exponential backoff on transient errors (503, 429)
+// Helper function to call Gemini API with retry and model fallbacks
 async function generateContentWithRetry(params: {
   contents: any;
   config?: any;
@@ -44,7 +67,7 @@ async function generateContentWithRetry(params: {
     let delay = 1000;
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
-        console.log(`[AI REQUEST] Tentativa ${attempt} usando modelo: ${modelName}`);
+        console.log(`[AI REQUEST] Modelo: ${modelName} | Tentativa ${attempt}`);
         const response = await ai.models.generateContent({
           model: modelName,
           contents: params.contents,
@@ -55,7 +78,6 @@ async function generateContentWithRetry(params: {
         lastError = err;
         console.warn(`[AI WARNING] Falha na tentativa ${attempt} com modelo ${modelName}. Erro:`, err.message || err);
         
-        // Check if it's a transient/retryable error (503 UNAVAILABLE, 429 RATE LIMIT, or containing typical messages)
         const errMsg = (err.message || "").toUpperCase();
         const isTransient = 
           err.status === "UNAVAILABLE" || 
@@ -68,11 +90,10 @@ async function generateContentWithRetry(params: {
           errMsg.includes("LIMIT");
 
         if (isTransient && attempt < 3) {
-          console.log(`[AI RETRY] Erro temporário detectado. Aguardando ${delay}ms antes de tentar novamente...`);
+          console.log(`[AI RETRY] Aguardando ${delay}ms...`);
           await new Promise((resolve) => setTimeout(resolve, delay));
-          delay *= 2; // exponential backoff
+          delay *= 2;
         } else {
-          // Break to try next model
           break;
         }
       }
@@ -82,16 +103,40 @@ async function generateContentWithRetry(params: {
   throw lastError || new Error("Falha ao gerar conteúdo com a API do Gemini após tentar múltiplos modelos.");
 }
 
+// Create Express Router to handle API routes consistently in both Vercel and standalone Node
+const apiRouter = express.Router();
+
+// 0. Diagnostic Health Endpoint to test Vercel deployment and API Key presence
+apiRouter.get(["/health", "/gemini/health"], (req: any, res: any) => {
+  const apiKey = process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY;
+  const isKeyConfigured = Boolean(apiKey && apiKey.length > 5);
+
+  console.log(`[HEALTH CHECK]: Chamada recebida | User-Agent: ${req.headers["user-agent"] || "mobile/unknown"} | Chave configurada: ${isKeyConfigured}`);
+
+  res.json({
+    status: "ok",
+    service: "Glyco AI Backend API",
+    geminiKeyConfigured: isKeyConfigured,
+    keyPrefix: isKeyConfigured ? `${apiKey!.substring(0, 6)}...` : null,
+    keyLength: isKeyConfigured ? apiKey!.length : 0,
+    environment: process.env.VERCEL ? "vercel-serverless" : (process.env.NODE_ENV || "development"),
+    isVercel: Boolean(process.env.VERCEL),
+    timestamp: new Date().toISOString()
+  });
+});
+
 // 1. Endpoint for automatic trend & pattern analysis of patient's history
-app.post("/api/gemini/analyze-history", async (req: any, res: any) => {
+apiRouter.post("/gemini/analyze-history", async (req: any, res: any) => {
+  const startTime = Date.now();
+  console.log(`\n--- [INÍCIO /api/gemini/analyze-history] ---`);
+  console.log(`[CLIENTE]: ${req.headers["user-agent"] || "mobile"}`);
+
   try {
-    const { profile, glucoseLogs, foodLogs, medicationLogs, exerciseLogs } = req.body;
+    const { profile, glucoseLogs, foodLogs, medicationLogs, exerciseLogs } = req.body || {};
 
     if (!profile) {
       return res.status(400).json({ error: "Perfil de usuário é obrigatório." });
     }
-
-    const ai = getGeminiClient();
 
     const systemPrompt = `Você é um endocrinologista experiente e especialista em saúde digital.
 Analise os dados históricos do paciente com diabetes e gere insights acionáveis, padrões e estatísticas em português (Brasil).
@@ -180,23 +225,30 @@ Retorne os resultados em um formato JSON estruturado para exibição fluida no d
     });
 
     const resultText = response.text || "{}";
+    console.log(`[FIM SUCESSO analyze-history]: Tempo: ${Date.now() - startTime}ms`);
     res.json(JSON.parse(resultText));
   } catch (error: any) {
-    console.error("Erro ao analisar histórico:", error);
-    res.status(500).json({ error: error.message || "Erro interno do servidor ao analisar dados." });
+    console.error("[ERRO analyze-history]:", error.message || error);
+    res.status(500).json({
+      error: "Erro na Análise do Histórico",
+      message: error.message || "Erro interno ao processar histórico do paciente.",
+      details: String(error)
+    });
   }
 });
 
 // 2. Endpoint for smart chat conversations
-app.post("/api/gemini/chat", async (req: any, res: any) => {
+apiRouter.post("/gemini/chat", async (req: any, res: any) => {
+  const startTime = Date.now();
+  console.log(`\n--- [INÍCIO /api/gemini/chat] ---`);
+  console.log(`[CLIENTE]: ${req.headers["user-agent"] || "mobile"}`);
+
   try {
-    const { messages, profile, currentStats } = req.body;
+    const { messages, profile, currentStats } = req.body || {};
 
     if (!messages || !Array.isArray(messages)) {
       return res.status(400).json({ error: "Histórico de mensagens é obrigatório." });
     }
-
-    const ai = getGeminiClient();
 
     const systemInstruction = `Você é o Assistente Virtual da Glyco AI, um companheiro inteligente de suporte para diabetes.
 Use as seguintes regras cruciais de comportamento:
@@ -228,20 +280,10 @@ Tempo no alvo: ${currentStats?.timeInRange || "75"}%
 
     const fullInstruction = `${systemInstruction}\n\n${contextData}`;
 
-    // Map to standard Gemini Content objects for correct multi-turn chat
     const chatContents = messages.map((msg: any) => ({
       role: msg.sender === "user" ? "user" : "model",
       parts: [{ text: msg.text }]
     }));
-
-    // DEBUG LOGGING
-    console.log(`\n--- [DEBUG CHAT ASSISTANTE] ---`);
-    console.log(`[MODELO UTILIZADO]: gemini-3.5-flash`);
-    console.log(`[QUANTIDADE DE MENSAGENS NO HISTÓRICO]: ${messages.length}`);
-    console.log(`[PERFIL DO PACIENTE]: Tipo ${profile?.diabetesType || "Tipo 2"}, Insulina: ${profile?.usesInsulin ? "Sim" : "Não"}`);
-    if (messages.length > 0) {
-      console.log(`[ÚLTIMA PERGUNTA DO USUÁRIO]: "${messages[messages.length - 1].text}"`);
-    }
 
     const response = await generateContentWithRetry({
       contents: chatContents,
@@ -250,26 +292,29 @@ Tempo no alvo: ${currentStats?.timeInRange || "75"}%
       }
     });
 
-    console.log(`[RESPOSTA DA IA GERADA COM SUCESSO, COMPRIMENTO: ${response.text?.length || 0} caracteres]`);
-    console.log(`--- [FIM DEBUG CHAT ASSISTANTE] ---\n`);
-
+    console.log(`[FIM SUCESSO chat]: Resposta gerada em ${Date.now() - startTime}ms`);
     res.json({ text: response.text });
   } catch (error: any) {
-    console.error("Erro no chat inteligente:", error);
-    res.status(500).json({ error: error.message || "Erro interno do servidor no chat." });
+    console.error("[ERRO chat]:", error.message || error);
+    res.status(500).json({
+      error: "Erro no Chat Inteligente",
+      message: error.message || "Erro interno do servidor no chat.",
+      details: String(error)
+    });
   }
 });
 
 // 2.5. Endpoint for smart exercise daily plan generation
-app.post("/api/gemini/exercise-plan", async (req: any, res: any) => {
+apiRouter.post("/gemini/exercise-plan", async (req: any, res: any) => {
+  const startTime = Date.now();
+  console.log(`\n--- [INÍCIO /api/gemini/exercise-plan] ---`);
+
   try {
-    const { profile, currentStats, recentGlucoseLogs } = req.body;
+    const { profile, currentStats, recentGlucoseLogs } = req.body || {};
 
     if (!profile) {
       return res.status(400).json({ error: "Perfil do usuário é obrigatório." });
     }
-
-    const ai = getGeminiClient();
 
     const systemPrompt = `Você é um educador físico e especialista médico em diabetes. 
 Sua tarefa é montar um Plano de Exercícios ("Plano do Dia") personalizado e seguro em português brasileiro.
@@ -310,27 +355,27 @@ Retorne as informações em um formato JSON válido estruturado para renderizaç
         responseSchema: {
           type: Type.OBJECT,
           properties: {
-            title: { type: Type.STRING, description: "Título curto e acolhedor para o plano do dia (ex: 'Plano de Equilíbrio Glicêmico')." },
-            description: { type: Type.STRING, description: "Resumo explicativo de por que esse plano foi selecionado para o perfil dele." },
+            title: { type: Type.STRING, description: "Título curto e acolhedor para o plano do dia." },
+            description: { type: Type.STRING, description: "Resumo explicativo de por que esse plano foi selecionado." },
             recommendedExercises: {
               type: Type.ARRAY,
               items: {
                 type: Type.OBJECT,
                 properties: {
-                  exerciseId: { type: Type.STRING, description: "ID do exercício correspondente no nosso catálogo (ex: 'caminhada_moderada', 'agachamento_casa', 'alongamento_diabetes', etc., se aplicável)." },
+                  exerciseId: { type: Type.STRING, description: "ID do exercício correspondente no nosso catálogo." },
                   name: { type: Type.STRING, description: "Nome do exercício." },
-                  duration: { type: Type.STRING, description: "Duração recomendada ou número de séries/repetições (ex: '15 minutos', '3 séries de 10 repetições')." },
-                  intensity: { type: Type.STRING, description: "Intensidade recomendada: 'leve', 'moderada' ou 'alta'." },
-                  order: { type: Type.NUMBER, description: "Ordem sequencial da atividade, iniciando de 1." }
+                  duration: { type: Type.STRING, description: "Duração recomendada." },
+                  intensity: { type: Type.STRING, description: "Intensidade recomendada." },
+                  order: { type: Type.NUMBER, description: "Ordem sequencial da atividade." }
                 },
                 required: ["name", "duration", "intensity", "order"]
               },
               description: "Lista de 1 a 3 atividades sequenciais sugeridas."
             },
-            restTimeBetween: { type: Type.STRING, description: "Recomendação de tempo de descanso entre os exercícios/séries." },
-            suggestedIntensityText: { type: Type.STRING, description: "Orientações gerais sobre percepção de esforço seguro." },
-            glycemicPrecautions: { type: Type.STRING, description: "Precauções de segurança glicêmica essenciais (ex: 'Não treinar se glicose estiver abaixo de 100 mg/dL sem carboidrato prévio, ou acima de 250 mg/dL se houver cetonas')." },
-            medicalDisclaimer: { type: Type.STRING, description: "Aviso médico obrigatório deixando claro que é uma sugestão de apoio e não prescrição médica." }
+            restTimeBetween: { type: Type.STRING, description: "Recomendação de tempo de descanso." },
+            suggestedIntensityText: { type: Type.STRING, description: "Orientações gerais sobre percepção de esforço." },
+            glycemicPrecautions: { type: Type.STRING, description: "Precauções de segurança glicêmica essenciais." },
+            medicalDisclaimer: { type: Type.STRING, description: "Aviso médico obrigatório." }
           },
           required: ["title", "description", "recommendedExercises", "restTimeBetween", "suggestedIntensityText", "glycemicPrecautions", "medicalDisclaimer"]
         }
@@ -338,40 +383,45 @@ Retorne as informações em um formato JSON válido estruturado para renderizaç
     });
 
     const resultText = response.text || "{}";
+    console.log(`[FIM SUCESSO exercise-plan]: Tempo: ${Date.now() - startTime}ms`);
     res.json(JSON.parse(resultText));
   } catch (error: any) {
-    console.error("Erro ao gerar plano de exercícios:", error);
-    res.status(500).json({ error: error.message || "Erro interno do servidor ao gerar plano de exercícios." });
+    console.error("[ERRO exercise-plan]:", error.message || error);
+    res.status(500).json({
+      error: "Erro no Plano de Exercícios",
+      message: error.message || "Erro interno do servidor ao gerar plano de exercícios.",
+      details: String(error)
+    });
   }
 });
 
 // 3. Endpoint for food nutritional analysis (text description or base64 photo estimation)
-app.post("/api/gemini/analyze-food", async (req: any, res: any) => {
+apiRouter.post("/gemini/analyze-food", async (req: any, res: any) => {
   const startTime = Date.now();
   let foodDescription = "";
+  console.log(`\n--- [INÍCIO /api/gemini/analyze-food] ---`);
+  console.log(`[CLIENTE]: ${req.headers["user-agent"] || "mobile"}`);
+
   try {
     const { foodDescription: desc, base64Image, profile } = req.body || {};
     foodDescription = desc || "";
 
-    console.log(`\n--- [INÍCIO DA REQUISIÇÃO ANALISADOR DE ALIMENTOS MULTIMODAL] ---`);
-    console.log(`[HORÁRIO]: ${new Date().toISOString()}`);
-
     if (!foodDescription && !base64Image) {
-      console.warn("[AVISO]: Descrição do alimento e imagem estão ausentes.");
       return res.status(400).json({
         error: "Dados de Entrada Ausentes",
-        message: "Forneça uma descrição do alimento ou selecione uma foto da refeição.",
+        message: "Forneça uma descrição do alimento ou tire/selecione uma foto da refeição.",
         source: "Validação de Entrada (Servidor)",
         statusCode: 400
       });
     }
 
-    if (!process.env.GEMINI_API_KEY) {
-      console.error("[ERRO GRAVE]: GEMINI_API_KEY não configurada no ambiente!");
+    const apiKey = process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY;
+    if (!apiKey) {
+      console.error("[ERRO VERCEL]: GEMINI_API_KEY não encontrada nas variáveis de ambiente!");
       return res.status(500).json({
-        error: "Chave de API do Gemini Não Configurada",
-        message: "A chave de API GEMINI_API_KEY não foi configurada no servidor.",
-        source: "Configuração do Servidor (Variáveis de Ambiente)",
+        error: "Chave do Gemini Não Configurada",
+        message: "A chave de API GEMINI_API_KEY não foi configurada nas variáveis de ambiente do Vercel.",
+        source: "Painel da Vercel (Project Settings > Environment Variables)",
         statusCode: 500
       });
     }
@@ -394,7 +444,6 @@ Usa Insulina? ${profile?.usesInsulin ? "Sim" : "Não"}
     const partsList: any[] = [];
 
     if (base64Image) {
-      // Robust Base64 Extraction
       const parts = base64Image.split(";base64,");
       const mimeType = parts[0]?.split(":")[1] || "image/jpeg";
       const cleanBase64 = parts[1];
@@ -408,7 +457,7 @@ Usa Insulina? ${profile?.usesInsulin ? "Sim" : "Não"}
         });
       }
 
-      console.log(`[DADOS DA IMAGEM]: Imagem recebida no backend. MimeType: "${mimeType}", Comprimento Base64: ${cleanBase64.length} caracteres.`);
+      console.log(`[DADOS DA FOTO]: MimeType: "${mimeType}", Tamanho Base64: ${cleanBase64.length} caracteres.`);
 
       partsList.push({
         inlineData: {
@@ -418,31 +467,31 @@ Usa Insulina? ${profile?.usesInsulin ? "Sim" : "Não"}
       });
 
       promptText = `
-Você recebeu uma FOTO real de um prato de comida enviada pelo usuário.
+Você recebeu uma FOTO real de um prato de comida enviada pelo usuário via celular/navegador.
 Você deve analisar VISUALMENTE esta foto e identificar todos os alimentos individuais visíveis na imagem.
 
-Sua resposta DEVE ser extremamente fiel ao que está de fato na foto. Não use respostas genéricas ou prontas. Se for pizza, descreva a pizza. Se for feijoada, salada ou strogonoff, identifique as guarnições exatas visíveis na foto.
+Sua resposta DEVE ser extremamente fiel ao que está de fato na foto. Não use respostas genéricas.
 
 No campo 'explanation', você DEVE iniciar obrigatoriamente informando o que identificou na imagem, no seguinte formato:
 "Na imagem identifiquei:
 - [alimento 1]
 - [alimento 2]
 ..."
-Depois disso, forneça uma análise nutricional completa e amigável contendo orientações práticas focadas em diabetes (ex: ordem de ingestão dos macronutrientes, dicas para achatar a curva glicêmica).
+Depois disso, forneça uma análise nutricional completa contendo orientações práticas focadas em diabetes.
 
 Preencha os campos estruturados de forma realista para o prato e sua porção visível:
-- 'foodName': O nome específico e real do prato identificado (ex: "Feijoada Completa", "Pizza de Calabresa", "Strogonoff de Carne com Batata Palha", "Salada de Folhas com Frango", etc.).
-- 'portionSize': Estimativa da porção (ex: "Prato de 350g", "1 fatia média de 120g", etc.).
-- 'carbohydrates', 'sugar', 'fiber', 'protein', 'fats', 'calories': Estimativa nutricional realista para essa porção.
+- 'foodName': O nome específico e real do prato identificado.
+- 'portionSize': Estimativa da porção.
+- 'carbohydrates', 'sugar', 'fiber', 'protein', 'fats', 'calories': Estimativa nutricional realista.
 - 'glycemicLoad': Carga glicêmica estimada da porção.
 - 'glycemicIndexRating': 'baixo', 'medio' ou 'alto'.
-- 'expectedImpact': 'Baixo', 'Moderado' ou 'Alto' de acordo com o impacto esperado para o diabetes do paciente.
+- 'expectedImpact': 'Baixo', 'Moderado' ou 'Alto'.
 `;
       if (foodDescription) {
-        promptText += `\nDescrição adicional do usuário para guiar a análise: "${foodDescription}"`;
+        promptText += `\nDescrição adicional do usuário: "${foodDescription}"`;
       }
     } else {
-      console.log(`[DADOS DE TEXTO]: Nenhuma imagem. Descrição de texto recebida: "${foodDescription}"`);
+      console.log(`[DADOS DE TEXTO]: Descrição recebida: "${foodDescription}"`);
 
       promptText = `
 Analise a seguinte descrição de refeição:
@@ -453,22 +502,14 @@ No campo 'explanation', você DEVE iniciar obrigatoriamente no seguinte formato:
 - [alimento 1]
 - [alimento 2]
 ..."
-Depois, forneça as estimativas nutricionais realistas de uma porção padrão desse prato e o impacto esperado para o diabetes do paciente.
-
-Preencha todos os campos estruturados em conformidade com a refeição descrita.
+Depois, forneça as estimativas nutricionais realistas e o impacto esperado para o diabetes do paciente.
 `;
     }
 
-    console.log(`[PROMPT ENVIADO]:\n${promptText.trim()}\n`);
-
     partsList.push({ text: promptText });
 
-    const requestContents = {
-      parts: partsList
-    };
-
     const response = await generateContentWithRetry({
-      contents: requestContents,
+      contents: { parts: partsList },
       config: {
         systemInstruction: systemInstruction,
         responseMimeType: "application/json",
@@ -476,7 +517,7 @@ Preencha todos os campos estruturados em conformidade com a refeição descrita.
           type: Type.OBJECT,
           properties: {
             foodName: { type: Type.STRING, description: "Nome exato e específico do prato identificado." },
-            portionSize: { type: Type.STRING, description: "Porção de referência estimada (ex: 1 prato de 300g)." },
+            portionSize: { type: Type.STRING, description: "Porção de referência estimada." },
             carbohydrates: { type: Type.NUMBER, description: "Gramas de carboidratos estimados." },
             sugar: { type: Type.NUMBER, description: "Gramas de açúcares simples estimados." },
             fiber: { type: Type.NUMBER, description: "Gramas de fibras estimadas." },
@@ -485,8 +526,8 @@ Preencha todos os campos estruturados em conformidade com a refeição descrita.
             calories: { type: Type.NUMBER, description: "Quantidade de calorias (kcal)." },
             glycemicLoad: { type: Type.NUMBER, description: "Carga Glicêmica estimada da porção." },
             glycemicIndexRating: { type: Type.STRING, description: "Classificação do índice glicêmico: 'baixo', 'medio' ou 'alto'." },
-            expectedImpact: { type: Type.STRING, description: "Impacto esperado na glicemia (ex: 'Baixo', 'Moderado', 'Alto')." },
-            explanation: { type: Type.STRING, description: "Explicação detalhada que DEVE começar listando os alimentos identificados na imagem e depois fornecer conselhos práticos e nutricionais inteligentes." }
+            expectedImpact: { type: Type.STRING, description: "Impacto esperado na glicemia ('Baixo', 'Moderado', 'Alto')." },
+            explanation: { type: Type.STRING, description: "Explicação detalhada dos alimentos e conselhos nutricionais." }
           },
           required: [
             "foodName",
@@ -510,7 +551,6 @@ Preencha todos os campos estruturados em conformidade com a refeição descrita.
     const resultText = response.text || "{}";
     const parsedResult = JSON.parse(resultText);
 
-    // Validate whether Gemini was able to recognize a food item
     const fnLower = (parsedResult.foodName || "").toLowerCase();
     const expLower = (parsedResult.explanation || "").toLowerCase();
 
@@ -519,24 +559,20 @@ Preencha todos os campos estruturados em conformidade com a refeição descrita.
       fnLower.includes("não foi possível") || 
       fnLower.includes("desconhecido") || 
       fnLower.includes("não identificado") ||
-      fnLower.includes("imagem não identificada") ||
-      (parsedResult.carbohydrates === 0 && parsedResult.protein === 0 && parsedResult.fats === 0 && (expLower.includes("nenhum alimento") || expLower.includes("não foi possível") || expLower.includes("sem alimentos")));
+      (parsedResult.carbohydrates === 0 && parsedResult.protein === 0 && parsedResult.fats === 0 && (expLower.includes("nenhum alimento") || expLower.includes("sem alimentos")));
 
     if (isUnrecognized && base64Image) {
-      console.warn(`[FALHA DE RECONHECIMENTO]: A foto foi processada, mas nenhum alimento foi reconhecido na imagem.`);
+      console.warn(`[RECONHECIMENTO INCOMPLETO]: Nenhum alimento identificado na imagem.`);
       return res.status(422).json({
         error: "Foto Não Reconhecida",
-        message: "A Inteligência Artificial não conseguiu identificar nenhum alimento visível nesta imagem. Por favor, envie uma foto clara, bem iluminada e focada no prato de comida.",
-        source: "Inteligência Artificial (Reconhecimento Visual Gemini)",
+        message: "A Inteligência Artificial não conseguiu identificar nenhum alimento visível nesta foto. Por favor, envie uma foto bem iluminada e focada no prato de comida.",
+        source: "Inteligência Artificial (Gemini)",
         statusCode: 422,
         details: parsedResult.explanation
       });
     }
 
-    console.log(`[TEMPO DA REQUISIÇÃO]: ${duration}ms`);
-    console.log(`[RESPOSTA RETORNADA DO GEMINI]:\n${resultText}\n`);
-    console.log(`--- [FIM SUCESSO ANALISADOR DE ALIMENTOS MULTIMODAL] ---\n`);
-
+    console.log(`[FIM SUCESSO analyze-food]: Concluído em ${duration}ms`);
     res.json(parsedResult);
   } catch (error: any) {
     const elapsedTime = Date.now() - startTime;
@@ -546,26 +582,17 @@ Preencha todos os campos estruturados em conformidade com a refeição descrita.
     let statusCode = error.status || error.statusCode || 500;
 
     if (errMsg.includes("413") || errMsg.includes("Payload Too Large") || error.type === "entity.too.large") {
-      source = "Servidor (Tamanho da Imagem Excede o Limite)";
+      source = "Servidor (Tamanho da Imagem Excede o Limite do Vercel Serverless)";
       statusCode = 413;
-    } else if (errMsg.includes("503") || errMsg.includes("UNAVAILABLE") || errMsg.includes("429") || errMsg.includes("Quota") || errMsg.includes("RATE_LIMIT")) {
-      source = "API do Gemini (Limite de Cota de Requisições / Serviço Indisponível Temporariamente)";
+    } else if (errMsg.includes("503") || errMsg.includes("UNAVAILABLE") || errMsg.includes("429") || errMsg.includes("Quota")) {
+      source = "API do Gemini (Limite de Requisições / Serviço Temporariamente Indisponível)";
       statusCode = 503;
-    } else if (errMsg.includes("API key") || errMsg.includes("API_KEY") || errMsg.includes("unauthorized") || errMsg.includes("403")) {
-      source = "API do Gemini (Chave de API Inválida ou Não Configurada)";
+    } else if (errMsg.includes("API key") || errMsg.includes("API_KEY") || errMsg.includes("403")) {
+      source = "API do Gemini (Chave de API GEMINI_API_KEY Inválida ou Não Configurada)";
       statusCode = 403;
-    } else if (errMsg.includes("Base64") || errMsg.includes("image") || errMsg.includes("canvas")) {
-      source = "Processamento de Imagem no Servidor";
-      statusCode = 400;
     }
 
-    console.error(`\n================= ERRO GRAVE NO ANALISADOR MULTIMODAL =================`);
-    console.error(`[TEMPO ATÉ FALHAR]: ${elapsedTime}ms`);
-    console.error(`[MENSAGEM DE ERRO]: ${errMsg}`);
-    console.error(`[FONTE IDENTIFICADA]: ${source}`);
-    console.error(`[STATUS HTTP / CÓDIGO]: ${statusCode}`);
-    console.error(`[STACK TRACE]:\n${error.stack}\n`);
-    console.error(`========================================================================\n`);
+    console.error(`[ERRO CRÍTICO analyze-food]: ${errMsg} (Status: ${statusCode}, Tempo: ${elapsedTime}ms)`);
 
     res.status(statusCode).json({
       error: "Falha na Análise da Foto / Refeição",
@@ -578,27 +605,36 @@ Preencha todos os campos estruturados em conformidade com a refeição descrita.
   }
 });
 
-// Serve frontend build static files in production, use Vite middleware in development
-async function setupViteOrStatic() {
-  if (process.env.NODE_ENV !== "production") {
-    console.log("Starting server in development mode with Vite middleware...");
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
-    });
-    app.use(vite.middlewares);
-  } else {
-    console.log("Starting server in production mode serving static files...");
-    const distPath = path.join(process.cwd(), "dist");
-    app.use(express.static(distPath));
-    app.get("*", (req: any, res: any) => {
-      res.sendFile(path.join(distPath, "index.html"));
+// Mount router on both /api and / root path for Vercel Serverless rewriting compatibility
+app.use("/api", apiRouter);
+app.use("/", apiRouter);
+
+// Export express app as default for Vercel Serverless Functions
+export default app;
+
+// If running in traditional Node.js environment (Cloud Run / Local Dev Server)
+if (process.env.VERCEL !== "1") {
+  async function setupViteOrStatic() {
+    if (process.env.NODE_ENV !== "production") {
+      console.log("Iniciando servidor Express em modo Desenvolvimento com Vite...");
+      const vite = await createViteServer({
+        server: { middlewareMode: true },
+        appType: "spa",
+      });
+      app.use(vite.middlewares);
+    } else {
+      console.log("Iniciando servidor Express em modo Produção servindo arquivos estáticos...");
+      const distPath = path.join(process.cwd(), "dist");
+      app.use(express.static(distPath));
+      app.get("*", (req: any, res: any) => {
+        res.sendFile(path.join(distPath, "index.html"));
+      });
+    }
+
+    app.listen(PORT, "0.0.0.0", () => {
+      console.log(`Glyco AI rodando com sucesso na porta ${PORT}`);
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Glyco AI is listening on http://localhost:${PORT}`);
-  });
+  setupViteOrStatic();
 }
-
-setupViteOrStatic();

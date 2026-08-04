@@ -3,7 +3,7 @@
   "appId": "1:56894907794:web:9e7e92e38f818f65c94d4b",
   "apiKey": "AIzaSyC9UWvMhMpP16L-klJ3BZlBIXa6Tl34eP4",
   "authDomain": "glyco-ffbab.firebaseapp.com",
-  "firestoreDatabaseId": "",
+  "firestoreDatabaseId": "(default)",
   "storageBucket": "glyco-ffbab.firebasestorage.app",
   "messagingSenderId": "56894907794",
   "measurementId": "",

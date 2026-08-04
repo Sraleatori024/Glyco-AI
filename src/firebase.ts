@@ -22,7 +22,7 @@ googleProvider.setCustomParameters({ prompt: "select_account" });
 
 // Use custom firestore database ID only if non-empty string provided in env or config
 const customDbId = (import.meta as any).env?.VITE_FIREBASE_DATABASE_ID || config.firestoreDatabaseId;
-export const db = (customDbId && customDbId.trim() !== "")
+export const db = (customDbId && customDbId.trim() !== "" && customDbId !== "(default)")
   ? getFirestore(app, customDbId)
   : getFirestore(app);
 

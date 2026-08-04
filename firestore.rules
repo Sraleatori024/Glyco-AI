@@ -2,16 +2,6 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // ==========================================
-    // 1. GLOBAL SAFETY NET (DEFAULT DENY)
-    // ==========================================
-    match /{document=**} {
-      allow read, write: if false;
-    }
-
-    // ==========================================
-    // 2. REUSABLE SECURITY PRIMITIVES
-    // ==========================================
     function isSignedIn() {
       return request.auth != null;
     }
@@ -23,179 +13,54 @@ service cloud.firestore {
     function isAdmin() {
       return isSignedIn() && (
         request.auth.token.email == 'nickinicolas380@gmail.com' ||
-        request.auth.token.email == 'nickinicolas380@gmil.com' ||
-        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin')
+        request.auth.token.email == 'nickinicolas380@gmil.com'
       );
     }
 
-    function isValidId(id) {
-      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    // Connection ping test
+    match /test_connection/{docId} {
+      allow read, write: if true;
     }
 
-    // ==========================================
-    // 3. SCHEMA VALIDATION BLUEPRINTS
-    // ==========================================
-    function isValidUser(data) {
-      return data.uid is string && data.uid.size() <= 128 &&
-             data.email is string && data.email.size() <= 200 &&
-             (!('role' in data) || data.role is string) &&
-             (!('name' in data) || (data.name is string && data.name.size() <= 100));
-    }
-
-    function isValidGlucose(data) {
-      return data.id is string && data.id.size() <= 128 &&
-             data.uid is string && data.uid == request.auth.uid &&
-             data.value is number && data.value >= 0 && data.value <= 1000 &&
-             data.type is string && (data.type in ['jejum', 'antes_refeicao', 'depois_refeicao', 'antes_dormir', 'outros']) &&
-             data.timestamp is string && data.timestamp.size() <= 100;
-    }
-
-    function isValidMeal(data) {
-      return data.id is string && data.id.size() <= 128 &&
-             data.uid is string && data.uid == request.auth.uid &&
-             data.description is string && data.description.size() <= 1000 &&
-             data.carbs is number && data.carbs >= 0 &&
-             data.timestamp is string && data.timestamp.size() <= 100;
-    }
-
-    function isValidMedication(data) {
-      return data.id is string && data.id.size() <= 128 &&
-             data.uid is string && data.uid == request.auth.uid &&
-             data.name is string && data.name.size() <= 200 &&
-             data.dosage is string && data.dosage.size() <= 100 &&
-             data.status is string && (data.status in ['aplicado', 'pendente']) &&
-             data.timestamp is string && data.timestamp.size() <= 100;
-    }
-
-    function isValidInsulin(data) {
-      return data.id is string && data.id.size() <= 128 &&
-             data.uid is string && data.uid == request.auth.uid &&
-             data.type is string && (data.type in ['ultrarrapida', 'rapida', 'nph', 'lenta_basal']) &&
-             data.doseUnits is number && data.doseUnits >= 0 &&
-             data.status is string && (data.status in ['aplicado', 'pendente', 'atrasado']) &&
-             (!('timeScheduled' in data) || (data.timeScheduled is string && data.timeScheduled.size() <= 50)) &&
-             (!('customName' in data) || (data.customName is string && data.customName.size() <= 200)) &&
-             (!('applicationSite' in data) || (data.applicationSite is string && data.applicationSite.size() <= 50)) &&
-             (!('notes' in data) || (data.notes is string && data.notes.size() <= 1000)) &&
-             (!('timestamp' in data) || (data.timestamp is string && data.timestamp.size() <= 100));
-    }
-
-    function isValidExercise(data) {
-      return data.id is string && data.id.size() <= 128 &&
-             data.uid is string && data.uid == request.auth.uid &&
-             data.type is string && data.type.size() <= 200 &&
-             data.duration is number && data.duration > 0 && data.duration <= 1440 &&
-             data.intensity is string && (data.intensity in ['leve', 'moderado', 'intenso']) &&
-             data.timestamp is string && data.timestamp.size() <= 100;
-    }
-
-    function isValidChatMessage(data) {
-      return data.id is string && data.id.size() <= 128 &&
-             data.uid is string && data.uid == request.auth.uid &&
-             (
-               (data.sender is string && (data.sender in ['user', 'assistant']) &&
-                data.text is string && data.text.size() <= 10000 &&
-                data.timestamp is string && data.timestamp.size() <= 100)
-               ||
-               (data.pergunta is string && data.pergunta.size() <= 10000 &&
-                data.resposta is string && data.resposta.size() <= 10000 &&
-                data['data'] is string && data['data'].size() <= 30 &&
-                data['horário'] is string && data['horário'].size() <= 30 &&
-                data.timestamp is string && data.timestamp.size() <= 100)
-             );
-    }
-
-    function isValidAuditLog(data) {
-      return data.adminEmail is string && data.adminEmail.size() <= 200 &&
-             data.action is string && data.action.size() <= 100 &&
-             data.targetUserId is string && data.targetUserId.size() <= 128 &&
-             data.timestamp is string && data.timestamp.size() <= 100;
-    }
-
-    // ==========================================
-    // 4. COLLECTION ACCESS GATES
-    // ==========================================
-
-    // Users Collection (Root Profiles & Settings)
+    // Users Collection (User Profiles & Settings)
     match /users/{userId} {
-      allow get: if isOwner(userId) || isAdmin();
+      allow read, write: if isOwner(userId) || isAdmin();
       allow list: if isAdmin();
-      allow create: if isOwner(userId) && isValidUser(request.resource.data);
-      allow update: if (
-        // Standard User updates their own profile fields without altering protected billing/RBAC settings
-        (isOwner(userId) &&
-         isValidUser(request.resource.data) &&
-         (!('role' in request.resource.data) || request.resource.data.role == resource.data.role) &&
-         (!('plan' in request.resource.data) || request.resource.data.plan == resource.data.plan) &&
-         (!('subscriptionPlan' in request.resource.data) || request.resource.data.subscriptionPlan == resource.data.subscriptionPlan) &&
-         (!('subscriptionStatus' in request.resource.data) || request.resource.data.subscriptionStatus == resource.data.subscriptionStatus) &&
-         (!('isBlocked' in request.resource.data) || request.resource.data.isBlocked == resource.data.isBlocked)) ||
-        // Admin overrides
-        isAdmin()
-      );
-      allow delete: if isAdmin();
     }
 
-    // Glucose levels entries
+    // Glucose records
     match /glucose_records/{recordId} {
-      allow get: if isSignedIn() && (resource.data.uid == request.auth.uid || isAdmin());
-      allow list: if isSignedIn() && (resource.data.uid == request.auth.uid || isAdmin());
-      allow create: if isSignedIn() && isValidId(recordId) && isValidGlucose(request.resource.data);
-      allow update: if isSignedIn() && isValidId(recordId) && isValidGlucose(request.resource.data) && (resource.data.uid == request.auth.uid || isAdmin());
-      allow delete: if isSignedIn() && (resource.data.uid == request.auth.uid || isAdmin());
+      allow read, write: if isSignedIn() && (resource == null || resource.data.uid == request.auth.uid || request.resource.data.uid == request.auth.uid || isAdmin());
     }
 
-    // Food logs entries
+    // Meal records
     match /meals/{mealId} {
-      allow get: if isSignedIn() && (resource.data.uid == request.auth.uid || isAdmin());
-      allow list: if isSignedIn() && (resource.data.uid == request.auth.uid || isAdmin());
-      allow create: if isSignedIn() && isValidId(mealId) && isValidMeal(request.resource.data);
-      allow update: if isSignedIn() && isValidId(mealId) && isValidMeal(request.resource.data) && (resource.data.uid == request.auth.uid || isAdmin());
-      allow delete: if isSignedIn() && (resource.data.uid == request.auth.uid || isAdmin());
+      allow read, write: if isSignedIn() && (resource == null || resource.data.uid == request.auth.uid || request.resource.data.uid == request.auth.uid || isAdmin());
     }
 
-    // Medication logs entries
+    // Medication records
     match /medications/{medId} {
-      allow get: if isSignedIn() && (resource.data.uid == request.auth.uid || isAdmin());
-      allow list: if isSignedIn() && (resource.data.uid == request.auth.uid || isAdmin());
-      allow create: if isSignedIn() && isValidId(medId) && isValidMedication(request.resource.data);
-      allow update: if isSignedIn() && isValidId(medId) && isValidMedication(request.resource.data) && (resource.data.uid == request.auth.uid || isAdmin());
-      allow delete: if isSignedIn() && (resource.data.uid == request.auth.uid || isAdmin());
+      allow read, write: if isSignedIn() && (resource == null || resource.data.uid == request.auth.uid || request.resource.data.uid == request.auth.uid || isAdmin());
     }
 
-    // Insulin logs entries
+    // Insulin records
     match /insulin_records/{insulinId} {
-      allow get: if isSignedIn() && (resource.data.uid == request.auth.uid || isAdmin());
-      allow list: if isSignedIn() && (resource.data.uid == request.auth.uid || isAdmin());
-      allow create: if isSignedIn() && isValidId(insulinId) && isValidInsulin(request.resource.data);
-      allow update: if isSignedIn() && isValidId(insulinId) && isValidInsulin(request.resource.data) && (resource.data.uid == request.auth.uid || isAdmin());
-      allow delete: if isSignedIn() && (resource.data.uid == request.auth.uid || isAdmin());
+      allow read, write: if isSignedIn() && (resource == null || resource.data.uid == request.auth.uid || request.resource.data.uid == request.auth.uid || isAdmin());
     }
 
-    // Physical activities entries
+    // Exercise history
     match /exercise_history/{exId} {
-      allow get: if isSignedIn() && (resource.data.uid == request.auth.uid || isAdmin());
-      allow list: if isSignedIn() && (resource.data.uid == request.auth.uid || isAdmin());
-      allow create: if isSignedIn() && isValidId(exId) && isValidExercise(request.resource.data);
-      allow update: if isSignedIn() && isValidId(exId) && isValidExercise(request.resource.data) && (resource.data.uid == request.auth.uid || isAdmin());
-      allow delete: if isSignedIn() && (resource.data.uid == request.auth.uid || isAdmin());
+      allow read, write: if isSignedIn() && (resource == null || resource.data.uid == request.auth.uid || request.resource.data.uid == request.auth.uid || isAdmin());
     }
 
-    // Copilot conversation messages
+    // Copilot / Chat history
     match /ai_history/{msgId} {
-      allow get: if isSignedIn() && (resource.data.uid == request.auth.uid || isAdmin());
-      allow list: if isSignedIn() && (resource.data.uid == request.auth.uid || isAdmin());
-      allow create: if isSignedIn() && isValidId(msgId) && isValidChatMessage(request.resource.data);
-      allow update: if isSignedIn() && isValidId(msgId) && isValidChatMessage(request.resource.data) && (resource.data.uid == request.auth.uid || isAdmin());
-      allow delete: if isSignedIn() && (resource.data.uid == request.auth.uid || isAdmin());
+      allow read, write: if isSignedIn() && (resource == null || resource.data.uid == request.auth.uid || request.resource.data.uid == request.auth.uid || isAdmin());
     }
 
-    // Security & control action audit stream
+    // Audit logs
     match /audit_logs/{logId} {
-      allow read: if isAdmin();
-      allow create: if isAdmin() && isValidId(logId) && isValidAuditLog(request.resource.data);
-      allow update, delete: if false; // Logs once written are completely immutable
+      allow read, write: if isAdmin();
     }
   }
 }

@@ -4,6 +4,7 @@ import { UserProfile, DiabetesType } from "../types";
 import { Heart, Activity, User, Target, ChevronRight, ChevronLeft, Check, ShieldAlert } from "lucide-react";
 
 interface OnboardingViewProps {
+  initialProfile?: UserProfile | null;
   onComplete: (profile: UserProfile) => void;
 }
 
@@ -17,22 +18,22 @@ const GOALS_PRESETS = [
   "Gerar relatórios claros para meu médico",
 ];
 
-export default function OnboardingView({ onComplete }: OnboardingViewProps) {
+export default function OnboardingView({ initialProfile, onComplete }: OnboardingViewProps) {
   const [step, setStep] = useState(1);
   const [profile, setProfile] = useState<Partial<UserProfile>>({
-    name: "",
-    age: 35,
-    gender: "Masculino",
-    height: 175,
-    weight: 75,
-    diabetesType: "tipo2",
-    medications: [],
-    usesInsulin: false,
-    insulinTypes: [],
-    targetGlucoseMinJejum: 70,
-    targetGlucoseMaxJejum: 130,
-    targetGlucoseMaxPosPrandial: 180,
-    goals: [],
+    name: initialProfile?.name || "",
+    age: initialProfile?.age || 35,
+    gender: initialProfile?.gender || "Masculino",
+    height: initialProfile?.height || 175,
+    weight: initialProfile?.weight || 75,
+    diabetesType: initialProfile?.diabetesType || "tipo2",
+    medications: initialProfile?.medications || [],
+    usesInsulin: initialProfile?.usesInsulin || false,
+    insulinTypes: initialProfile?.insulinTypes || [],
+    targetGlucoseMinJejum: initialProfile?.targetGlucoseMinJejum || 70,
+    targetGlucoseMaxJejum: initialProfile?.targetGlucoseMaxJejum || 130,
+    targetGlucoseMaxPosPrandial: initialProfile?.targetGlucoseMaxPosPrandial || 180,
+    goals: initialProfile?.goals || [],
   });
 
   const [currentMed, setCurrentMed] = useState("");

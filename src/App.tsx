@@ -550,12 +550,20 @@ export default function App() {
     return <AuthView onAuthSuccess={(uid, email) => setUser({ uid, email })} />;
   }
 
-  // Onboarding Interception
+  // Onboarding Interception: If user profile doesn't exist or is missing diabetesType/onboarding fields
   if (!profile || !profile.diabetesType) {
     return (
       <OnboardingView
+        initialProfile={profile}
         onComplete={(newProfile) => {
-          saveProfile(newProfile);
+          const mergedProfile: UserProfile = {
+            ...profile,
+            ...newProfile,
+            uid: user.uid,
+            email: user.email,
+            updatedAt: new Date().toISOString(),
+          };
+          saveProfile(mergedProfile);
           setCurrentView("dashboard");
         }}
       />

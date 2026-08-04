@@ -1,10 +1,12 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { 
   signInWithEmailAndPassword, 
   createUserWithEmailAndPassword, 
   sendPasswordResetEmail, 
-  signInWithPopup
+  signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult
 } from "firebase/auth";
 import { auth, googleProvider } from "../firebase";
 import { Activity, Mail, Lock, Sparkles, ArrowRight, CheckCircle, AlertCircle, Heart } from "lucide-react";
@@ -21,6 +23,40 @@ export default function AuthView({ onAuthSuccess }: AuthViewProps) {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [forgotPassword, setForgotPassword] = useState(false);
+
+  // Catch OAuth redirect login result on page load
+  useEffect(() => {
+    getRedirectResult(auth)
+      .then((result) => {
+        if (result && result.user) {
+          onAuthSuccess(result.user.uid, result.user.email || "");
+        }
+      })
+      .catch((err) => {
+        console.error("Erro no retorno do redirecionamento Google Auth:", err);
+        formatAuthError(err);
+      });
+  }, []);
+
+  const formatAuthError = (err: any) => {
+    console.error("Detalhes do erro Firebase Auth:", err);
+    let text = "Ocorreu um erro na autenticação.";
+    if (err.code === "auth/unauthorized-domain") {
+      const currentHost = window.location.hostname;
+      text = `Domínio não autorizado ("${currentHost}"). Você precisa adicionar este domínio no Firebase Console em Authentication > Settings > Authorized Domains.`;
+    } else if (err.code === "auth/popup-blocked") {
+      text = "O popup de login foi bloqueado pelo seu navegador. Redirecionando para login em tela cheia...";
+    } else if (err.code === "auth/popup-closed-by-user") {
+      text = "A janela do Google foi fechada antes de concluir o login.";
+    } else if (err.code === "auth/operation-not-allowed") {
+      text = "O login com Google não está ativado no Firebase Console (Authentication > Sign-in method).";
+    } else if (err.code === "auth/cancelled-popup-request") {
+      text = "Solicitação de login anterior cancelada.";
+    } else if (err.message) {
+      text = err.message;
+    }
+    setMessage({ type: "error", text });
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -69,14 +105,33 @@ export default function AuthView({ onAuthSuccess }: AuthViewProps) {
     setLoading(true);
     setMessage(null);
     try {
+      // Set custom parameter to prompt account selection
+      googleProvider.setCustomParameters({ prompt: 'select_account' });
+      
+      // Attempt popup auth first
       const result = await signInWithPopup(auth, googleProvider);
-      onAuthSuccess(result.user.uid, result.user.email || "");
+      if (result && result.user) {
+        onAuthSuccess(result.user.uid, result.user.email || "");
+      }
     } catch (err: any) {
-      console.error("Erro no login do Google:", err);
-      setMessage({
-        type: "error",
-        text: "O login com Google falhou ou foi bloqueado. Se estiver usando o iframe, clique em 'Abrir em nova aba' acima para permitir popups."
-      });
+      console.error("Erro no login do Google com popup:", err);
+      // Fallback to redirect on mobile or if popup was blocked/closed
+      if (
+        err.code === "auth/popup-blocked" || 
+        err.code === "auth/popup-closed-by-user" || 
+        err.code === "auth/cancelled-popup-request" ||
+        /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
+      ) {
+        try {
+          console.log("Tentando login por redirecionamento (signInWithRedirect)...");
+          await signInWithRedirect(auth, googleProvider);
+          return;
+        } catch (redirectErr: any) {
+          formatAuthError(redirectErr);
+        }
+      } else {
+        formatAuthError(err);
+      }
     } finally {
       setLoading(false);
     }

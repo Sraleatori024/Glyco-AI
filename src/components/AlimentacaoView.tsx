@@ -34,19 +34,19 @@ export default function AlimentacaoView({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
 
-  // Helper to resize and compress image to keep payload lightweight (< 300KB)
+  // Helper to resize and compress image to keep payload lightweight (< 200KB for Vercel)
   const resizeAndCompressImage = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const img = window.Image ? new window.Image() : document.createElement("img");
-        img.onload = () => {
+      const blobUrl = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        try {
           const canvas = document.createElement("canvas");
           let width = img.width;
           let height = img.height;
           
-          // Set maximum width or height to 1024px to keep it high-quality yet lightweight
-          const MAX_SIZE = 1024;
+          // Max dimension 800px guarantees crisp food photo while staying under 150KB
+          const MAX_SIZE = 800;
           if (width > height) {
             if (width > MAX_SIZE) {
               height = Math.round((height * MAX_SIZE) / width);
@@ -64,24 +64,72 @@ export default function AlimentacaoView({
           
           const ctx = canvas.getContext("2d");
           if (!ctx) {
-            reject(new Error("Não foi possível criar o contexto do canvas."));
+            URL.revokeObjectURL(blobUrl);
+            reject(new Error("Não foi possível obter o contexto de renderização 2D."));
             return;
           }
           
           ctx.drawImage(img, 0, 0, width, height);
           
-          // Compress as JPEG with 0.75 quality for maximum performance and compatibility
-          const dataUrl = canvas.toDataURL("image/jpeg", 0.75);
+          // Compress as JPEG with 0.70 quality
+          const dataUrl = canvas.toDataURL("image/jpeg", 0.70);
+          URL.revokeObjectURL(blobUrl);
+          
+          if (!dataUrl || dataUrl.length < 100) {
+            reject(new Error("Falha ao gerar o Data URL da imagem comprimida."));
+            return;
+          }
+
+          console.log(`[COMPRESSÃO DE FOTO]: Redimensionada de ${img.width}x${img.height} para ${width}x${height}. Tamanho do payload: ${Math.round(dataUrl.length / 1024)} KB`);
           resolve(dataUrl);
-        };
-        img.onerror = () => {
-          reject(new Error("Erro ao carregar a imagem para processamento."));
-        };
-        img.src = event.target?.result as string;
+        } catch (err) {
+          URL.revokeObjectURL(blobUrl);
+          reject(err);
+        }
       };
-      reader.onerror = () => {
-        reject(new Error("Erro ao ler o arquivo de imagem."));
+      img.onerror = () => {
+        URL.revokeObjectURL(blobUrl);
+        reject(new Error("Erro ao carregar o arquivo de imagem no elemento HTML."));
       };
+      img.src = blobUrl;
+    });
+  };
+
+  // Safe fallback compression if primary canvas scaling encounters an exception
+  const fallbackCompress = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const rawUrl = e.target?.result as string;
+        if (!rawUrl) {
+          reject(new Error("Erro ao ler dados da foto."));
+          return;
+        }
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement("canvas");
+          const MAX = 600;
+          let w = img.width;
+          let h = img.height;
+          if (w > h) {
+            if (w > MAX) { h = Math.round((h * MAX) / w); w = MAX; }
+          } else {
+            if (h > MAX) { w = Math.round((w * MAX) / h); h = MAX; }
+          }
+          canvas.width = w;
+          canvas.height = h;
+          const ctx = canvas.getContext("2d");
+          if (ctx) {
+            ctx.drawImage(img, 0, 0, w, h);
+            resolve(canvas.toDataURL("image/jpeg", 0.60));
+          } else {
+            resolve(rawUrl.substring(0, 1000000)); // Truncate safely
+          }
+        };
+        img.onerror = () => reject(new Error("Falha no fallback de imagem."));
+        img.src = rawUrl;
+      };
+      reader.onerror = () => reject(new Error("Erro no FileReader."));
       reader.readAsDataURL(file);
     });
   };
@@ -99,14 +147,18 @@ export default function AlimentacaoView({
       const compressedDataUrl = await resizeAndCompressImage(file);
       setBase64Image(compressedDataUrl);
     } catch (err: any) {
-      console.error("Erro no redimensionamento/compressão da imagem:", err);
-      // Fallback: use raw reader if compression fails
-      const reader = new FileReader();
-      reader.onload = () => {
-        setBase64Image(reader.result as string);
-        setAnalysisError(null);
-      };
-      reader.readAsDataURL(file);
+      console.warn("[WARN COMPRESSÃO]: Tentando método alternativo de compressão...", err);
+      try {
+        const fallbackDataUrl = await fallbackCompress(file);
+        setBase64Image(fallbackDataUrl);
+      } catch (fallbackErr: any) {
+        setAnalysisError({
+          title: "Erro ao Processar Foto",
+          source: "Navegador / Memória do Celular",
+          message: "Não foi possível comprimir a foto selecionada. Tente capturar uma foto com resolução menor ou selecionar outro arquivo de imagem.",
+          details: String(fallbackErr)
+        });
+      }
     }
   };
 

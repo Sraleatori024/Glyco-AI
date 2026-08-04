@@ -126,7 +126,7 @@ apiRouter.get(["/health", "/gemini/health"], (req: any, res: any) => {
 });
 
 // 1. Endpoint for automatic trend & pattern analysis of patient's history
-apiRouter.post("/gemini/analyze-history", async (req: any, res: any) => {
+apiRouter.post(["/gemini/analyze-history", "/analyze-history", "/api/gemini/analyze-history"], async (req: any, res: any) => {
   const startTime = Date.now();
   console.log(`\n--- [INÍCIO /api/gemini/analyze-history] ---`);
   console.log(`[CLIENTE]: ${req.headers["user-agent"] || "mobile"}`);
@@ -238,7 +238,7 @@ Retorne os resultados em um formato JSON estruturado para exibição fluida no d
 });
 
 // 2. Endpoint for smart chat conversations
-apiRouter.post("/gemini/chat", async (req: any, res: any) => {
+apiRouter.post(["/gemini/chat", "/chat", "/api/gemini/chat"], async (req: any, res: any) => {
   const startTime = Date.now();
   console.log(`\n--- [INÍCIO /api/gemini/chat] ---`);
   console.log(`[CLIENTE]: ${req.headers["user-agent"] || "mobile"}`);
@@ -305,7 +305,7 @@ Tempo no alvo: ${currentStats?.timeInRange || "75"}%
 });
 
 // 2.5. Endpoint for smart exercise daily plan generation
-apiRouter.post("/gemini/exercise-plan", async (req: any, res: any) => {
+apiRouter.post(["/gemini/exercise-plan", "/exercise-plan", "/api/gemini/exercise-plan"], async (req: any, res: any) => {
   const startTime = Date.now();
   console.log(`\n--- [INÍCIO /api/gemini/exercise-plan] ---`);
 
@@ -396,7 +396,7 @@ Retorne as informações em um formato JSON válido estruturado para renderizaç
 });
 
 // 3. Endpoint for food nutritional analysis (text description or base64 photo estimation)
-apiRouter.post("/gemini/analyze-food", async (req: any, res: any) => {
+apiRouter.post(["/gemini/analyze-food", "/analyze-food", "/api/gemini/analyze-food"], async (req: any, res: any) => {
   const startTime = Date.now();
   let foodDescription = "";
   console.log(`\n--- [INÍCIO /api/gemini/analyze-food] ---`);

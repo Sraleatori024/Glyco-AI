@@ -66,10 +66,42 @@ export default function App() {
 
   const [isPremiumState, setIsPremiumState] = useState<boolean>(() => localStorage.getItem("glyco_premium") === "true");
 
-  const isPremium = isPremiumState || 
-                    (user && (user.email === "nickinicolas380@gmail.com" || user.email === "nickinicolas380@gmil.com")) || 
-                    profile?.plan === "premium" || 
-                    profile?.subscriptionPlan === "premium";
+  const handleLogout = async () => {
+    localStorage.removeItem("glyco_offline_user");
+    localStorage.removeItem("glyco_profile");
+    setUser(null);
+    setProfile(null);
+    try {
+      await signOut(auth);
+    } catch (err) {
+      console.warn("Erro no logout Firebase:", err);
+    }
+  };
+
+  // 7-day free trial calculation
+  const calculateTrialStatus = () => {
+    if (!profile?.createdAt) return { daysRemaining: 7, isExpired: false };
+    const createdAtTime = new Date(profile.createdAt).getTime();
+    if (isNaN(createdAtTime)) return { daysRemaining: 7, isExpired: false };
+    
+    const now = Date.now();
+    const elapsedMs = now - createdAtTime;
+    const elapsedDays = Math.floor(elapsedMs / (1000 * 60 * 60 * 24));
+    const daysRemaining = Math.max(0, 7 - elapsedDays);
+    const isExpired = elapsedDays >= 7;
+    return { daysRemaining, isExpired };
+  };
+
+  const { daysRemaining, isExpired: isTrialExpired } = calculateTrialStatus();
+
+  const isPaidSubscriber = isPremiumState || 
+                           (user && (user.email === "nickinicolas380@gmail.com" || user.email === "nickinicolas380@gmil.com")) || 
+                           profile?.role === "admin" ||
+                           profile?.plan === "premium" || 
+                           profile?.subscriptionPlan === "premium";
+
+  // Access is granted if user is a paid subscriber/admin OR if their 7-day free trial is active
+  const isPremium = isPaidSubscriber || !isTrialExpired;
 
   const setIsPremium = (val: boolean) => {
     setIsPremiumState(val);
@@ -587,6 +619,41 @@ export default function App() {
           })}
         </nav>
 
+        {/* Trial Status Pill Card in Sidebar */}
+        <div className="px-4 py-2">
+          {isPaidSubscriber ? (
+            <div className="bg-emerald-500/10 border border-emerald-500/20 px-3 py-2 rounded-xl text-emerald-600 dark:text-emerald-400 text-xxs font-bold flex items-center justify-between">
+              <span className="flex items-center gap-1">
+                <Sparkles className="w-3.5 h-3.5" />
+                Assinatura Ativa
+              </span>
+              <span className="bg-emerald-500 text-white text-[9px] px-1.5 py-0.2 rounded-full font-black uppercase">PRO</span>
+            </div>
+          ) : isTrialExpired ? (
+            <button
+              onClick={() => setCurrentView("subscription")}
+              className="w-full bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 px-3 py-2 rounded-xl text-red-600 dark:text-red-400 text-xxs font-bold flex items-center justify-between transition-all cursor-pointer"
+            >
+              <span className="flex items-center gap-1 truncate">
+                <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                Teste Expirado
+              </span>
+              <span className="bg-red-600 text-white text-[9px] px-1.5 py-0.2 rounded-full font-black">ASSINAR</span>
+            </button>
+          ) : (
+            <button
+              onClick={() => setCurrentView("subscription")}
+              className="w-full bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 px-3 py-2 rounded-xl text-amber-700 dark:text-amber-400 text-xxs font-bold flex items-center justify-between transition-all cursor-pointer"
+            >
+              <span className="flex items-center gap-1 truncate">
+                <Sparkles className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                Teste: {daysRemaining}d restante(s)
+              </span>
+              <span className="text-[10px] underline">Ver</span>
+            </button>
+          )}
+        </div>
+
         {/* User context info block */}
         <div className="p-4 border-t border-inherit">
           <div className="flex items-center gap-3 bg-neutral-50 dark:bg-neutral-800/50 p-3 rounded-2xl justify-between">
@@ -600,12 +667,7 @@ export default function App() {
               </div>
             </div>
             <button
-              onClick={async () => {
-                localStorage.removeItem("glyco_offline_user");
-                setUser(null);
-                setProfile(null);
-                await signOut(auth);
-              }}
+              onClick={handleLogout}
               title="Encerrar Sessão"
               className="p-1.5 text-neutral-400 hover:text-red-500 rounded-lg transition-colors cursor-pointer"
             >
@@ -624,6 +686,18 @@ export default function App() {
           <span className="text-base font-bold tracking-tight">Glyco <span className="text-blue-600">AI</span></span>
         </div>
         <div className="flex items-center gap-2">
+          {!isPaidSubscriber && (
+            <button
+              onClick={() => setCurrentView("subscription")}
+              className={`px-2.5 py-1 rounded-lg text-xxs font-bold ${
+                isTrialExpired
+                  ? "bg-red-600 text-white"
+                  : "bg-amber-100 text-amber-800 border border-amber-300"
+              }`}
+            >
+              {isTrialExpired ? "Assinar" : `${daysRemaining}d teste`}
+            </button>
+          )}
           <button
             onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
             className="p-2 text-neutral-500 hover:bg-neutral-100 rounded-lg"
@@ -659,6 +733,15 @@ export default function App() {
               );
             })}
           </nav>
+          <div className="p-4 border-t border-neutral-200 dark:border-neutral-800">
+            <button
+              onClick={handleLogout}
+              className="w-full py-3 bg-red-50 text-red-600 border border-red-200 dark:bg-red-950/40 dark:border-red-900 dark:text-red-400 rounded-xl text-xs font-bold flex items-center justify-center gap-2"
+            >
+              <LogOut className="w-4 h-4" />
+              Sair da Conta (Logout)
+            </button>
+          </div>
         </div>
       )}
 
@@ -676,6 +759,27 @@ export default function App() {
                   Recomendamos a ingestão imediata de 15g de carboidratos rápidos (ex: 150ml de refrigerante normal ou suco de frutas) e verificar os níveis novamente em 15 minutos. Evite esforços.
                 </p>
               </div>
+            </div>
+          )}
+
+          {/* Trial Expired Alert Banner */}
+          {isTrialExpired && !isPaidSubscriber && (
+            <div className="bg-amber-500/10 border border-amber-500/30 p-4 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-amber-900 dark:text-amber-200 print:hidden">
+              <div className="flex items-start gap-3">
+                <Sparkles className="w-5 h-5 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
+                <div>
+                  <p className="text-xs font-bold">Seu Período de Teste Gratuito de 7 Dias Expirou</p>
+                  <p className="text-xxs text-neutral-600 dark:text-neutral-400 mt-0.5">
+                    Assine o plano Glyco AI Premium para desbloquear o Copiloto IA, gerador de relatórios e análises nutricionais sem limitações.
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setCurrentView("subscription")}
+                className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold shrink-0 transition-all cursor-pointer shadow-xs"
+              >
+                Conhecer Planos
+              </button>
             </div>
           )}
 
@@ -768,8 +872,10 @@ export default function App() {
 
           {currentView === "subscription" && (
             <SubscriptionView
-              currentPlan={isPremium ? "premium" : "free"}
-              subscriptionStatus={isPremium ? "active" : "inactive"}
+              currentPlan={isPaidSubscriber ? "premium" : "free"}
+              subscriptionStatus={isPaidSubscriber ? "active" : "inactive"}
+              trialDaysRemaining={daysRemaining}
+              isTrialExpired={isTrialExpired}
               onUpgrade={async (plan, period) => {
                 setIsPremium(true);
                 localStorage.setItem("glyco_premium", "true");
@@ -833,6 +939,7 @@ export default function App() {
               profile={profile}
               onUpdateProfile={saveProfile}
               onResetData={handleResetData}
+              onLogout={handleLogout}
               darkMode={darkMode}
               onToggleDarkMode={() => setDarkMode(!darkMode)}
             />

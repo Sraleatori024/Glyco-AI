@@ -1,11 +1,12 @@
 import React, { useState } from "react";
 import { UserProfile } from "../types";
-import { Settings, Shield, Target, Bell, Heart, Save, CheckCircle, Database, Moon, Sun } from "lucide-react";
+import { Settings, Shield, Target, Bell, Heart, Save, CheckCircle, Database, Moon, Sun, LogOut, User } from "lucide-react";
 
 interface ConfiguracoesViewProps {
   profile: UserProfile;
   onUpdateProfile: (p: UserProfile) => void;
   onResetData: () => void;
+  onLogout: () => void;
   darkMode: boolean;
   onToggleDarkMode: () => void;
 }
@@ -14,6 +15,7 @@ export default function ConfiguracoesView({
   profile,
   onUpdateProfile,
   onResetData,
+  onLogout,
   darkMode,
   onToggleDarkMode,
 }: ConfiguracoesViewProps) {
@@ -273,6 +275,26 @@ export default function ConfiguracoesView({
               </button>
             </div>
           </div>
+        </div>
+
+        {/* Account and Session card */}
+        <div className="bg-white p-6 border border-neutral-100 rounded-3xl shadow-2xs space-y-4">
+          <h4 className="text-xs font-bold text-neutral-400 uppercase tracking-widest flex items-center gap-1">
+            <User className="w-3.5 h-3.5 text-blue-600" />
+            Sessão e Conta
+          </h4>
+          <div className="bg-neutral-50 p-3.5 rounded-2xl border border-neutral-200/80 space-y-1">
+            <p className="text-xs font-bold text-neutral-800">{profile.name}</p>
+            <p className="text-xxs text-neutral-500">{profile.email || "Conta Autenticada"}</p>
+          </div>
+
+          <button
+            onClick={onLogout}
+            className="w-full py-3 bg-neutral-900 hover:bg-neutral-800 text-white rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 shadow-xs cursor-pointer"
+          >
+            <LogOut className="w-4 h-4 text-red-400" />
+            Sair da Conta (Logout)
+          </button>
         </div>
 
         {/* Data administration card */}

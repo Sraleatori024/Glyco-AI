@@ -17,6 +17,8 @@ import {
 interface SubscriptionViewProps {
   currentPlan: string;
   subscriptionStatus: string;
+  trialDaysRemaining?: number;
+  isTrialExpired?: boolean;
   onUpgrade: (plan: "free" | "premium", period: "monthly" | "yearly") => Promise<void>;
   onCancel: () => Promise<void>;
   onReactivate: () => Promise<void>;
@@ -25,6 +27,8 @@ interface SubscriptionViewProps {
 export default function SubscriptionView({ 
   currentPlan, 
   subscriptionStatus, 
+  trialDaysRemaining = 7,
+  isTrialExpired = false,
   onUpgrade, 
   onCancel, 
   onReactivate 
@@ -88,20 +92,24 @@ export default function SubscriptionView({
           <span className="text-xxs font-bold text-neutral-500 uppercase tracking-wider">Seu Plano Atual</span>
           <div className="flex items-center gap-2 mt-1">
             <h3 className="text-base font-black capitalize">
-              {currentPlan === "premium" ? "Premium" : "Gratuito"}
+              {currentPlan === "premium" ? "Premium" : "Gratuito (Período de Teste)"}
             </h3>
             <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
               subscriptionStatus === "active" 
                 ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" 
-                : "bg-neutral-800 text-neutral-400 border border-neutral-700"
+                : isTrialExpired
+                  ? "bg-red-500/10 text-red-400 border border-red-500/20"
+                  : "bg-amber-500/10 text-amber-400 border border-amber-500/20"
             }`}>
-              {subscriptionStatus === "active" ? "Ativo" : "Cancelado / Inativo"}
+              {subscriptionStatus === "active" ? "Ativo" : isTrialExpired ? "Teste Expirado" : `Teste: ${trialDaysRemaining} dia(s) restante(s)`}
             </span>
           </div>
           <p className="text-xxs text-neutral-400 mt-1">
             {isPremium 
               ? "Parabéns! Você tem acesso ilimitado a todas as ferramentas clínicas."
-              : "Seu plano atual tem limites de histórico e não inclui Copiloto IA."}
+              : isTrialExpired
+                ? "Seu período de teste gratuito de 7 dias expirou. Assine para reativar o acesso total ao Glyco AI."
+                : `Você está aproveitando o teste gratuito de 7 dias (${trialDaysRemaining} dia(s) restante(s)). Assine agora para garantir acesso ininterrupto.`}
           </p>
         </div>
 

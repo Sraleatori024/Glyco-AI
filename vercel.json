@@ -10,6 +10,39 @@
     {
       "source": "/api/:path*",
       "destination": "/api/index.ts"
+    },
+    {
+      "source": "/gemini/:path*",
+      "destination": "/api/index.ts"
+    },
+    {
+      "source": "/copilot",
+      "destination": "/api/index.ts"
+    },
+    {
+      "source": "/chat",
+      "destination": "/api/index.ts"
+    },
+    {
+      "source": "/analyze-food",
+      "destination": "/api/index.ts"
+    },
+    {
+      "source": "/analyze-food-photo",
+      "destination": "/api/index.ts"
+    },
+    {
+      "source": "/analyze-history",
+      "destination": "/api/index.ts"
+    },
+    {
+      "source": "/ai-analysis",
+      "destination": "/api/index.ts"
+    },
+    {
+      "source": "/health",
+      "destination": "/api/index.ts"
     }
   ]
 }
+

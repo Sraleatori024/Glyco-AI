@@ -1,7 +1,7 @@
 import React, { useState, useRef } from "react";
 import { FoodLog, UserProfile, FoodNutrition } from "../types";
 import { motion, AnimatePresence } from "motion/react";
-import { Apple, Upload, Image, Send, RefreshCw, Sparkles, CheckCircle2, ChevronRight, HelpCircle, Flame, Camera, AlertTriangle, X, AlertCircle, ShieldAlert } from "lucide-react";
+import { Apple, Upload, Image as ImageIcon, Send, RefreshCw, Sparkles, CheckCircle2, ChevronRight, HelpCircle, Flame, Camera, AlertTriangle, X, AlertCircle, ShieldAlert } from "lucide-react";
 
 interface AlimentacaoViewProps {
   logs: FoodLog[];
@@ -38,7 +38,7 @@ export default function AlimentacaoView({
   const resizeAndCompressImage = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
       const blobUrl = URL.createObjectURL(file);
-      const img = new Image();
+      const img = new window.Image();
       img.onload = () => {
         try {
           const canvas = document.createElement("canvas");
@@ -105,7 +105,7 @@ export default function AlimentacaoView({
           reject(new Error("Erro ao ler dados da foto."));
           return;
         }
-        const img = new Image();
+        const img = new window.Image();
         img.onload = () => {
           const canvas = document.createElement("canvas");
           const MAX = 600;
@@ -212,43 +212,66 @@ export default function AlimentacaoView({
     setAnalyzing(true);
 
     try {
-      const response = await fetch("/api/gemini/analyze-food", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          foodDescription: description,
-          base64Image: base64Image || undefined,
-          profile,
-        }),
+      const payload = JSON.stringify({
+        foodDescription: description,
+        base64Image: base64Image || undefined,
+        profile,
       });
 
-      if (!response.ok) {
-        let title = "Falha na Análise da Imagem";
-        let source = "Servidor / API Gemini";
-        let message = "Não foi possível analisar a imagem enviada.";
-        let details: string | undefined = undefined;
-        let statusCode = response.status;
+      const foodEndpoints = [
+        "/api/gemini/analyze-food",
+        "/api/analyze-food",
+        "/api/analyze-food-photo",
+        "/analyze-food-photo",
+        "/analyze-food"
+      ];
 
+      let response: Response | null = null;
+      let lastErrTitle = "Falha na Análise da Imagem";
+      let lastErrSource = "Servidor / API Gemini";
+      let lastErrMessage = "Não foi possível analisar a imagem enviada.";
+      let lastErrDetails: string | undefined = undefined;
+      let lastStatusCode = 500;
+
+      for (const endpoint of foodEndpoints) {
         try {
-          const errData = await response.json();
-          title = errData.error || title;
-          source = errData.source || source;
-          message = errData.message || message;
-          details = errData.details;
-          if (errData.statusCode) statusCode = errData.statusCode;
-        } catch {
-          try {
-            const txt = await response.text();
-            if (txt) details = txt;
-          } catch (_) {}
-        }
+          const res = await fetch(endpoint, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: payload,
+          });
 
+          if (res.ok) {
+            response = res;
+            break;
+          } else {
+            lastStatusCode = res.status;
+            try {
+              const errData = await res.json();
+              lastErrTitle = errData.error || lastErrTitle;
+              lastErrSource = errData.source || lastErrSource;
+              lastErrMessage = errData.message || lastErrMessage;
+              lastErrDetails = errData.details;
+              if (errData.statusCode) lastStatusCode = errData.statusCode;
+            } catch (_) {
+              try {
+                const txt = await res.text();
+                if (txt) lastErrDetails = txt;
+              } catch (_) {}
+            }
+          }
+        } catch (err: any) {
+          console.warn(`[FOOD ANALYSIS RETRY] Falha no endpoint ${endpoint}:`, err);
+        }
+      }
+
+      if (!response || !response.ok) {
         setAnalysisError({
-          title,
-          source,
-          message,
-          statusCode,
-          details
+          title: lastErrTitle,
+          source: lastErrSource,
+          message: lastErrMessage,
+          statusCode: lastStatusCode,
+          details: lastErrDetails
         });
         return;
       }
@@ -399,7 +422,7 @@ export default function AlimentacaoView({
                       onClick={() => fileInputRef.current?.click()}
                       className="p-3 border border-neutral-200/80 bg-white hover:bg-neutral-50 rounded-xl flex flex-col items-center justify-center text-center gap-1.5 cursor-pointer transition-all hover:scale-[1.02] active:scale-[0.98]"
                     >
-                      <Image className="w-5 h-5 text-emerald-600" />
+                      <ImageIcon className="w-5 h-5 text-emerald-600" />
                       <span className="text-[11px] font-bold text-neutral-800">Galeria</span>
                     </button>
                   </div>

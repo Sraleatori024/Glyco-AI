@@ -55,15 +55,13 @@ export default function DashboardView({
   // Calculate statistics from REAL current patient history data
   const latestGlucose = glucoseLogs.length > 0 ? glucoseLogs[glucoseLogs.length - 1] : null;
 
-  const averageGlucose = Math.round(
-    glucoseLogs.length > 0
-      ? glucoseLogs.reduce((acc, log) => acc + log.value, 0) / glucoseLogs.length
-      : 120
-  );
+  const averageGlucose = glucoseLogs.length > 0
+    ? Math.round(glucoseLogs.reduce((acc, log) => acc + log.value, 0) / glucoseLogs.length)
+    : 0;
 
   // Calculate Time in Range (TIR)
   const calculateTimeInRange = () => {
-    if (glucoseLogs.length === 0) return 100;
+    if (glucoseLogs.length === 0) return 0;
     const inRangeLogs = glucoseLogs.filter((log) => {
       const isJejum = log.type === "jejum" || log.type === "antes_dormir";
       const min = profile.targetGlucoseMinJejum || 70;
@@ -77,14 +75,6 @@ export default function DashboardView({
 
   const timeInRange = calculateTimeInRange();
 
-  // Calculate 7-day and 30-day averages
-  const now = new Date();
-  const logs7d = glucoseLogs.filter((l) => (now.getTime() - new Date(l.timestamp).getTime()) <= 7 * 86400 * 1000);
-  const logs30d = glucoseLogs.filter((l) => (now.getTime() - new Date(l.timestamp).getTime()) <= 30 * 86400 * 1000);
-
-  const average7d = logs7d.length > 0 ? Math.round(logs7d.reduce((a, b) => a + b.value, 0) / logs7d.length) : averageGlucose;
-  const average30d = logs30d.length > 0 ? Math.round(logs30d.reduce((a, b) => a + b.value, 0) / logs30d.length) : averageGlucose;
-
   // Find next scheduled pending medication & insulin
   const pendingMeds = medicationLogs.filter((m) => m.status === "pendente");
   const nextMedication = pendingMeds.length > 0 ? pendingMeds[0] : null;
@@ -92,12 +82,7 @@ export default function DashboardView({
   const pendingInsulin = insulinLogs.filter((i) => i.status === "pendente");
   const nextInsulin = pendingInsulin.length > 0 ? pendingInsulin[0] : null;
 
-  // Next meal suggestion / schedule
-  const nextMealTime = "12:30 - Almoço";
   const lastFood = foodLogs.length > 0 ? foodLogs[foodLogs.length - 1] : null;
-
-  // Next exercise suggestion / schedule
-  const lastExercise = exerciseLogs.length > 0 ? exerciseLogs[exerciseLogs.length - 1] : null;
 
   // Filter glucose logs based on range for chart
   const getFilteredLogsForChart = () => {
@@ -126,6 +111,25 @@ export default function DashboardView({
 
   // Call the server-side Gemini endpoint for smart profile analysis
   const fetchAIAnalysis = async (force: boolean = false) => {
+    if (glucoseLogs.length === 0) {
+      setAiAnalysis({
+        overallStatus: "Nenhum dado cadastrado ainda.",
+        controlTrend: "estável",
+        patterns: [
+          "Registre suas medições glicêmicas para que a IA possa analisar seus padrões."
+        ],
+        insights: [
+          {
+            title: "Primeiros Passos",
+            description: "Cadastre sua primeira medição de glicemia usando o botão '+ Nova Medição' acima.",
+            type: "info"
+          }
+        ],
+        medicalDisclaimer: "Lembre-se: os insights da Glyco AI são educativos e complementam a avaliação do seu médico."
+      });
+      return;
+    }
+
     const cached = localStorage.getItem(`glyco_ai_analysis_${profile.name}`);
     if (cached && !force) {
       setAiAnalysis(JSON.parse(cached));
@@ -134,19 +138,38 @@ export default function DashboardView({
 
     setLoadingAI(true);
     try {
-      const response = await fetch("/api/gemini/analyze-history", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          profile,
-          glucoseLogs: glucoseLogs.slice(-15), // send recent logs for analysis
-          foodLogs: foodLogs.slice(-5),
-          medicationLogs: medicationLogs.slice(-5),
-          exerciseLogs: exerciseLogs.slice(-5),
-        }),
+      const payload = JSON.stringify({
+        profile,
+        glucoseLogs: glucoseLogs.slice(-15),
+        foodLogs: foodLogs.slice(-5),
+        medicationLogs: medicationLogs.slice(-5),
       });
 
-      if (!response.ok) {
+      const historyEndpoints = [
+        "/api/gemini/analyze-history",
+        "/api/analyze-history",
+        "/api/ai-analysis",
+        "/analyze-history"
+      ];
+
+      let response: Response | null = null;
+      for (const endpoint of historyEndpoints) {
+        try {
+          const res = await fetch(endpoint, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: payload,
+          });
+          if (res.ok) {
+            response = res;
+            break;
+          }
+        } catch (err) {
+          console.warn(`[HISTORY RETRY] Falha no endpoint ${endpoint}:`, err);
+        }
+      }
+
+      if (!response || !response.ok) {
         throw new Error("Falha ao analisar dados com IA.");
       }
 
@@ -155,33 +178,20 @@ export default function DashboardView({
       localStorage.setItem(`glyco_ai_analysis_${profile.name}`, JSON.stringify(data));
     } catch (err) {
       console.error("Erro ao chamar endpoint de IA:", err);
-      // Fallback response for offline/empty states
       setAiAnalysis({
-        overallStatus: "Seu controle está estável, mas requer atenção a picos pós-refeições.",
+        overallStatus: "Seu controle está sendo monitorado.",
         controlTrend: "estável",
         patterns: [
-          "Tendência de aumento após o café da manhã.",
-          "Boa resposta hipoglicemiante após sessões de caminhada.",
-          "Níveis estáveis no período pré-sono."
+          "Acompanhamento ativo de medições glicêmicas.",
         ],
         insights: [
           {
-            title: "Ajuste na refeição matinal",
-            description: "Adicione fibras como sementes de chia ou farelo de aveia ao café da manhã para retardar a absorção de carboidratos.",
-            type: "alerta"
-          },
-          {
-            title: "Exercício pós-jantar",
-            description: "Excelente impacto da caminhada de 40 minutos ontem. Mantenha para otimizar a sensibilidade à insulina.",
-            type: "sucesso"
-          },
-          {
-            title: "Hidratação e sono",
-            description: "Níveis levemente elevados nos dias de sono reduzido. Priorize 7-8 horas de sono de qualidade.",
+            title: "Acompanhamento Regular",
+            description: "Continue registrando suas medições e refeições diariamente para relatórios mais precisos.",
             type: "info"
           }
         ],
-        medicalDisclaimer: "Lembre-se: os insights da Glyco AI são educativos e complementam, mas não substituem, a avaliação do seu médico."
+        medicalDisclaimer: "Lembre-se: os insights da Glyco AI são educativos e complementam a avaliação do seu médico."
       });
     } finally {
       setLoadingAI(false);

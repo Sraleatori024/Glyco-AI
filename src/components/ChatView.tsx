@@ -1,7 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { Message, UserProfile } from "../types";
-import { Send, Sparkles, User, Brain, AlertTriangle, RefreshCw, Lock, Dumbbell, Copy, Share2, Bookmark } from "lucide-react";
-import { SMART_EXERCISES } from "../data/exercises";
+import { Send, Sparkles, User, Brain, AlertTriangle, RefreshCw, Lock, Copy, Share2, Bookmark } from "lucide-react";
 
 interface ChatViewProps {
   messages: Message[];
@@ -14,13 +13,12 @@ interface ChatViewProps {
   };
   isPremium: boolean;
   onNavigateToSubscription?: () => void;
-  onViewExercise?: (exerciseId: string) => void;
 }
 
 const CHAT_PRESETS = [
   { label: "Posso comer pizza?", query: "Tenho diabetes e gostaria de saber se posso comer pizza, qual o impacto e como amenizar o pico glicêmico?" },
   { label: "O que fazer em hipoglicemia?", query: "Estou sentindo suor frio, tontura e tremores. O que devo fazer imediatamente?" },
-  { label: "Ajuda dos exercícios físicos", query: "Caminhar por 30 minutos após o jantar realmente ajuda no controle da minha glicemia?" },
+  { label: "Medição de Glicemia", query: "Qual é o melhor momento para medir a glicemia e como avaliar o impacto das refeições?" },
   { label: "Açúcar oculto em alimentos", query: "Quais alimentos comuns possuem açúcar oculto que eu deveria evitar?" },
 ];
 
@@ -32,7 +30,6 @@ export default function ChatView({
   currentStats,
   isPremium,
   onNavigateToSubscription,
-  onViewExercise,
 }: ChatViewProps) {
   const [inputText, setInputText] = useState("");
   const [loading, setLoading] = useState(false);
@@ -68,23 +65,40 @@ export default function ChatView({
         { id: Date.now().toString(), sender: "user", text: textToSend, timestamp: new Date().toISOString() },
       ];
 
-      const response = await fetch("/api/gemini/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          messages: updatedMessages.slice(-10), // send last 10 messages for context
-          profile,
-          currentStats,
-        }),
+      const payload = JSON.stringify({
+        messages: updatedMessages.slice(-10), // send last 10 messages for context
+        profile,
+        currentStats,
       });
 
-      if (!response.ok) {
-        let errorMsg = "Falha ao comunicar com assistente virtual.";
+      const chatEndpoints = ["/api/gemini/chat", "/api/copilot", "/api/chat", "/copilot", "/chat"];
+      let response: Response | null = null;
+      let lastErrorMsg = "Falha ao comunicar com assistente virtual.";
+
+      for (const endpoint of chatEndpoints) {
         try {
-          const errData = await response.json();
-          if (errData.message) errorMsg = errData.message;
-        } catch (_) {}
-        throw new Error(errorMsg);
+          const res = await fetch(endpoint, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: payload,
+          });
+
+          if (res.ok) {
+            response = res;
+            break;
+          } else {
+            try {
+              const errData = await res.json();
+              if (errData.message) lastErrorMsg = errData.message;
+            } catch (_) {}
+          }
+        } catch (err: any) {
+          console.warn(`[CHAT RETRY] Falha no endpoint ${endpoint}:`, err);
+        }
+      }
+
+      if (!response || !response.ok) {
+        throw new Error(lastErrorMsg);
       }
 
       const data = await response.json();
@@ -158,16 +172,6 @@ export default function ChatView({
         <div className="flex-1 overflow-y-auto p-6 space-y-4">
           {messages.map((msg) => {
             const isUser = msg.sender === "user";
-            
-            // Extract exercise tags from the message text
-            const exerciseRegex = /\[EXERCISE:([a-zA-Z0-9_-]+)\]/g;
-            const exerciseMatches: string[] = [];
-            let match;
-            while ((match = exerciseRegex.exec(msg.text)) !== null) {
-              exerciseMatches.push(match[1]);
-            }
-            
-            // Clean the exercise tag out of the visible message text
             const cleanMessageText = msg.text.replace(/\[EXERCISE:[a-zA-Z0-9_-]+\]/g, "").trim();
 
             return (
@@ -222,33 +226,6 @@ export default function ChatView({
                       </div>
                     )}
                   </div>
-
-                  {!isUser && exerciseMatches.map((exerciseId) => {
-                    const exercise = SMART_EXERCISES.find(e => e.id === exerciseId);
-                    if (!exercise) return null;
-                    return (
-                      <div
-                        key={exerciseId}
-                        className="bg-blue-50/75 border border-blue-150 p-4 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-3 shadow-xxs max-w-md animate-fade-in"
-                      >
-                        <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 bg-blue-100 rounded-xl flex items-center justify-center text-blue-600 shrink-0">
-                            <Dumbbell className="w-5 h-5" />
-                          </div>
-                          <div className="text-left">
-                            <p className="text-xs font-black text-blue-900 leading-tight">{exercise.name}</p>
-                            <p className="text-[10px] font-semibold text-blue-700 mt-0.5">Dificuldade: {exercise.difficulty === "iniciante" ? "Iniciante" : exercise.difficulty === "intermediario" ? "Intermediário" : "Avançado"}</p>
-                          </div>
-                        </div>
-                        <button
-                          onClick={() => onViewExercise?.(exerciseId)}
-                          className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xxs font-bold rounded-xl transition-all shadow-xs hover:shadow-md cursor-pointer whitespace-nowrap"
-                        >
-                          Ver como fazer
-                        </button>
-                      </div>
-                    );
-                  })}
                 </div>
               </div>
             );

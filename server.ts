@@ -26,8 +26,8 @@ app.use(express.urlencoded({ limit: "25mb", extended: true }));
 
 let aiClient: any = null;
 
-function getGeminiClient() {
-  const key = process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY;
+function getGeminiClient(customKey?: string) {
+  const key = customKey || process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY;
   if (!key) {
     console.error("==========================================================");
     console.error("[ERRO GRAVE DE CONFIGURAÇÃO - VERCEL / SERVIDOR]");
@@ -40,27 +40,25 @@ function getGeminiClient() {
     throw new Error("A chave GEMINI_API_KEY não está configurada no ambiente do Vercel. Por favor, adicione GEMINI_API_KEY no painel da Vercel em Project Settings > Environment Variables.");
   }
 
-  if (!aiClient) {
-    console.log(`[GEMINI INIT]: Inicializando SDK do Gemini. Chave configurada (Comprimento: ${key.length}, Prefixo: ${key.substring(0, 6)}...)`);
-    aiClient = new GoogleGenAI({
-      apiKey: key,
-      httpOptions: {
-        headers: {
-          "User-Agent": "aistudio-build",
-        },
+  console.log(`[GEMINI INIT]: Criando cliente SDK Gemini. (Chave: ${key.substring(0, 6)}... Tamanho: ${key.length})`);
+  return new GoogleGenAI({
+    apiKey: key,
+    httpOptions: {
+      headers: {
+        "User-Agent": "aistudio-build",
       },
-    });
-  }
-  return aiClient;
+    },
+  });
 }
 
 // Helper function to call Gemini API with retry and model fallbacks
 async function generateContentWithRetry(params: {
   contents: any;
   config?: any;
+  apiKey?: string;
 }) {
-  const ai = getGeminiClient();
-  const modelsToTry = ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-flash-latest", "gemini-3.1-flash-lite"];
+  const ai = getGeminiClient(params.apiKey);
+  const modelsToTry = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-flash-latest", "gemini-1.5-pro"];
   let lastError: any = null;
 
   for (const modelName of modelsToTry) {
@@ -107,8 +105,8 @@ async function generateContentWithRetry(params: {
 const apiRouter = express.Router();
 
 // 0. Diagnostic Health Endpoint to test Vercel deployment and API Key presence
-apiRouter.get(["/health", "/gemini/health"], (req: any, res: any) => {
-  const apiKey = process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY;
+apiRouter.get(["/health", "/gemini/health", "/api/health", "/api/gemini/health"], (req: any, res: any) => {
+  const apiKey = req.headers["x-gemini-api-key"] || process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY;
   const isKeyConfigured = Boolean(apiKey && apiKey.length > 5);
 
   console.log(`[HEALTH CHECK]: Chamada recebida | User-Agent: ${req.headers["user-agent"] || "mobile/unknown"} | Chave configurada: ${isKeyConfigured}`);
@@ -117,8 +115,8 @@ apiRouter.get(["/health", "/gemini/health"], (req: any, res: any) => {
     status: "ok",
     service: "Glyco AI Backend API",
     geminiKeyConfigured: isKeyConfigured,
-    keyPrefix: isKeyConfigured ? `${apiKey!.substring(0, 6)}...` : null,
-    keyLength: isKeyConfigured ? apiKey!.length : 0,
+    keyPrefix: isKeyConfigured ? `${String(apiKey).substring(0, 6)}...` : null,
+    keyLength: isKeyConfigured ? String(apiKey).length : 0,
     environment: process.env.VERCEL ? "vercel-serverless" : (process.env.NODE_ENV || "development"),
     isVercel: Boolean(process.env.VERCEL),
     timestamp: new Date().toISOString()
@@ -126,13 +124,14 @@ apiRouter.get(["/health", "/gemini/health"], (req: any, res: any) => {
 });
 
 // 1. Endpoint for automatic trend & pattern analysis of patient's history
-apiRouter.post(["/gemini/analyze-history", "/analyze-history", "/api/gemini/analyze-history"], async (req: any, res: any) => {
+apiRouter.post(["/gemini/analyze-history", "/analyze-history", "/ai-analysis", "/api/gemini/analyze-history", "/api/analyze-history", "/api/ai-analysis"], async (req: any, res: any) => {
   const startTime = Date.now();
   console.log(`\n--- [INÍCIO /api/gemini/analyze-history] ---`);
   console.log(`[CLIENTE]: ${req.headers["user-agent"] || "mobile"}`);
 
   try {
-    const { profile, glucoseLogs, foodLogs, medicationLogs, exerciseLogs } = req.body || {};
+    const customApiKey = req.headers["x-gemini-api-key"] || req.body?.apiKey;
+    const { profile, glucoseLogs, foodLogs, medicationLogs } = req.body || {};
 
     if (!profile) {
       return res.status(400).json({ error: "Perfil de usuário é obrigatório." });
@@ -165,23 +164,19 @@ ${JSON.stringify(foodLogs || [])}
 
 --- HISTÓRICO DE MEDICAMENTOS APLICADOS ---
 ${JSON.stringify(medicationLogs || [])}
-
---- HISTÓRICO DE EXERCÍCIOS ---
-${JSON.stringify(exerciseLogs || [])}
 `;
 
     const prompt = `Analise o histórico fornecido acima e identifique exatamente:
-1. Padrões identificados (ex: aumentos após café, quedas pós-exercício, hipoglicemias recorrentes).
+1. Padrões identificados (ex: aumentos após café, hipoglicemias recorrentes).
 2. Três insights inteligentes acionáveis e específicos para este paciente.
 3. Um resumo geral da evolução recente (ex: controle melhorou, está estável ou requer atenção).
 
 Retorne os resultados em um formato JSON estruturado para exibição fluida no dashboard.`;
 
     const response = await generateContentWithRetry({
+      apiKey: customApiKey,
       contents: [
-        { text: systemPrompt },
-        { text: patientContext },
-        { text: prompt }
+        { role: "user", parts: [{ text: systemPrompt }, { text: patientContext }, { text: prompt }] }
       ],
       config: {
         responseMimeType: "application/json",
@@ -237,13 +232,14 @@ Retorne os resultados em um formato JSON estruturado para exibição fluida no d
   }
 });
 
-// 2. Endpoint for smart chat conversations
-apiRouter.post(["/gemini/chat", "/chat", "/api/gemini/chat"], async (req: any, res: any) => {
+// 2. Endpoint for smart chat conversations (Copilot)
+apiRouter.post(["/gemini/chat", "/chat", "/copilot", "/api/gemini/chat", "/api/chat", "/api/copilot"], async (req: any, res: any) => {
   const startTime = Date.now();
-  console.log(`\n--- [INÍCIO /api/gemini/chat] ---`);
+  console.log(`\n--- [INÍCIO /api/gemini/chat / copilot] ---`);
   console.log(`[CLIENTE]: ${req.headers["user-agent"] || "mobile"}`);
 
   try {
+    const customApiKey = req.headers["x-gemini-api-key"] || req.body?.apiKey;
     const { messages, profile, currentStats } = req.body || {};
 
     if (!messages || !Array.isArray(messages)) {
@@ -256,17 +252,8 @@ Use as seguintes regras cruciais de comportamento:
 2. Leve em consideração o perfil clínico do paciente fornecido e suas estatísticas recentes.
 3. Se o paciente perguntar sobre alimentação (ex: "Posso comer pizza?"), forneça conselhos práticos e nutricionais inteligentes, explicando sobre moderação, contagem de carboidratos, ordem dos alimentos (comer fibras/proteínas antes) e o impacto esperado, sem proibicionismo punitivo.
 4. Se o usuário estiver relatando sintomas de hipoglicemia (tontura, suor frio, tremores), oriente IMEDIATAMENTE a regra dos 15g de carboidratos rápidos (ex: 150ml de refrigerante comum ou suco de laranja) e medir novamente em 15 minutos.
-5. Se você sugerir ou recomendar qualquer atividade física ou exercício do nosso catálogo, adicione explicitamente no final do texto o marcador "[EXERCISE:ID_DO_EXERCICIO]" em uma linha própria para que a interface de chat renderize um botão interativo "Ver como fazer". Os exercícios do catálogo disponíveis são:
-   - Caminhada Rítmica de Intervalo -> ID: caminhada_moderada
-   - Agachamento Livre com Cadeira -> ID: agachamento_casa
-   - Alongamento Integral para Flexibilidade -> ID: alongamento_diabetes
-   - Corrida Intervalada Aeróbica/Anaeróbica -> ID: corrida_intervalada
-   - Mobilidade Dinâmica de Quadril e Tornozelo -> ID: mobilidade_quadril
-   - Pedalada Estática de Baixo Impacto -> ID: pedalada_leve
-   - Remada Sentada com Faixa Elástica -> ID: forca_elastico
-   Exemplo: "Uma caminhada ativa pós-refeição ajudará a reduzir o pico glicêmico. [EXERCISE:caminhada_moderada]". Use APENAS esses IDs válidos.
-6. Sempre exiba um pequeno lembrete humilde de que suas respostas são informativas e não substituem o médico do paciente.
-7. EVITE repetição de frases, mensagens prontas ou respostas genéricas. Cada interação deve ser totalmente dinâmica e adaptada especificamente ao conteúdo e tom da pergunta atual.`;
+5. Sempre exiba um pequeno lembrete humilde de que suas respostas são informativas e não substituem o médico do paciente.
+6. EVITE repetição de frases, mensagens prontas ou respostas genéricas. Cada interação deve ser totalmente dinâmica e adaptada especificamente ao conteúdo e tom da pergunta atual.`;
 
     const contextData = `
 --- CONTEXTO DO PACIENTE ---
@@ -286,6 +273,7 @@ Tempo no alvo: ${currentStats?.timeInRange || "75"}%
     }));
 
     const response = await generateContentWithRetry({
+      apiKey: customApiKey,
       contents: chatContents,
       config: {
         systemInstruction: fullInstruction,
@@ -310,6 +298,7 @@ apiRouter.post(["/gemini/exercise-plan", "/exercise-plan", "/api/gemini/exercise
   console.log(`\n--- [INÍCIO /api/gemini/exercise-plan] ---`);
 
   try {
+    const customApiKey = req.headers["x-gemini-api-key"] || req.body?.apiKey;
     const { profile, currentStats, recentGlucoseLogs } = req.body || {};
 
     if (!profile) {
@@ -345,10 +334,9 @@ Selecione os exercícios mais adequados para a idade de ${profile.age} anos e di
 Retorne as informações em um formato JSON válido estruturado para renderização direta na interface.`;
 
     const response = await generateContentWithRetry({
+      apiKey: customApiKey,
       contents: [
-        { text: systemPrompt },
-        { text: patientContext },
-        { text: promptText }
+        { role: "user", parts: [{ text: systemPrompt }, { text: patientContext }, { text: promptText }] }
       ],
       config: {
         responseMimeType: "application/json",
@@ -396,13 +384,14 @@ Retorne as informações em um formato JSON válido estruturado para renderizaç
 });
 
 // 3. Endpoint for food nutritional analysis (text description or base64 photo estimation)
-apiRouter.post(["/gemini/analyze-food", "/analyze-food", "/api/gemini/analyze-food"], async (req: any, res: any) => {
+apiRouter.post(["/gemini/analyze-food", "/analyze-food", "/analyze-food-photo", "/food-analysis", "/api/gemini/analyze-food", "/api/analyze-food", "/api/analyze-food-photo", "/api/food-analysis"], async (req: any, res: any) => {
   const startTime = Date.now();
   let foodDescription = "";
   console.log(`\n--- [INÍCIO /api/gemini/analyze-food] ---`);
   console.log(`[CLIENTE]: ${req.headers["user-agent"] || "mobile"}`);
 
   try {
+    const customApiKey = req.headers["x-gemini-api-key"] || req.body?.apiKey;
     const { foodDescription: desc, base64Image, profile } = req.body || {};
     foodDescription = desc || "";
 
@@ -509,7 +498,8 @@ Depois, forneça as estimativas nutricionais realistas e o impacto esperado para
     partsList.push({ text: promptText });
 
     const response = await generateContentWithRetry({
-      contents: { parts: partsList },
+      apiKey: customApiKey,
+      contents: [{ role: "user", parts: partsList }],
       config: {
         systemInstruction: systemInstruction,
         responseMimeType: "application/json",

@@ -11,12 +11,6 @@ import {
   InsulinLog,
   ExerciseLog,
   Message,
-  INITIAL_PROFILE,
-  INITIAL_GLUCOSE_LOGS,
-  INITIAL_FOOD_LOGS,
-  INITIAL_MEDICATION_LOGS,
-  INITIAL_INSULIN_LOGS,
-  INITIAL_EXERCISE_LOGS,
   INITIAL_CHAT_MESSAGES
 } from "./types";
 import OnboardingView from "./components/OnboardingView";
@@ -24,12 +18,10 @@ import DashboardView from "./components/DashboardView";
 import GlicemiaView from "./components/GlicemiaView";
 import AlimentacaoView from "./components/AlimentacaoView";
 import MedicamentosView from "./components/MedicamentosView";
-import ExerciciosView from "./components/ExerciciosView";
 import ChatView from "./components/ChatView";
 import RelatoriosView from "./components/RelatoriosView";
 import ConfiguracoesView from "./components/ConfiguracoesView";
 import AuthView from "./components/AuthView";
-import AdminPanel from "./components/AdminPanel";
 import SubscriptionView from "./components/SubscriptionView";
 
 import {
@@ -37,19 +29,14 @@ import {
   Heart,
   Apple,
   Pill,
-  Dumbbell,
   Brain,
   Printer,
   Settings,
   Menu,
   X,
   Sparkles,
-  CheckCircle2,
   AlertTriangle,
   User,
-  Moon,
-  Sun,
-  ShieldCheck,
   LogOut
 } from "lucide-react";
 
@@ -95,12 +82,10 @@ export default function App() {
   const { daysRemaining, isExpired: isTrialExpired } = calculateTrialStatus();
 
   const isPaidSubscriber = isPremiumState || 
-                           (user && (user.email === "nickinicolas380@gmail.com" || user.email === "nickinicolas380@gmil.com")) || 
-                           profile?.role === "admin" ||
                            profile?.plan === "premium" || 
                            profile?.subscriptionPlan === "premium";
 
-  // Access is granted if user is a paid subscriber/admin OR if their 7-day free trial is active
+  // Access is granted if user is a paid subscriber OR if their 7-day free trial is active
   const isPremium = isPaidSubscriber || !isTrialExpired;
 
   const setIsPremium = (val: boolean) => {
@@ -114,7 +99,6 @@ export default function App() {
   const [chatMessages, setChatMessages] = useState<Message[]>([]);
   
   const [currentView, setCurrentView] = useState("dashboard");
-  const [selectedExerciseId, setSelectedExerciseId] = useState<string | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
 
@@ -159,12 +143,12 @@ export default function App() {
           if (!glucoseSnap.empty) {
             setGlucoseLogs(glucoseSnap.docs.map((d) => ({ id: d.id, ...d.data() } as GlucoseLog)));
           } else {
-            setGlucoseLogs(INITIAL_GLUCOSE_LOGS);
+            setGlucoseLogs([]);
           }
         } catch (err) {
           console.error("Error loading glucose logs from Firestore:", err);
           const saved = localStorage.getItem("glyco_glucose");
-          setGlucoseLogs(saved ? JSON.parse(saved) : INITIAL_GLUCOSE_LOGS);
+          setGlucoseLogs(saved ? JSON.parse(saved) : []);
         }
 
         // 3. Fetch food logs (top-level collection: meals)
@@ -174,12 +158,12 @@ export default function App() {
           if (!foodSnap.empty) {
             setFoodLogs(foodSnap.docs.map((d) => ({ id: d.id, ...d.data() } as FoodLog)));
           } else {
-            setFoodLogs(INITIAL_FOOD_LOGS);
+            setFoodLogs([]);
           }
         } catch (err) {
           console.error("Error loading food logs from Firestore:", err);
           const saved = localStorage.getItem("glyco_food");
-          setFoodLogs(saved ? JSON.parse(saved) : INITIAL_FOOD_LOGS);
+          setFoodLogs(saved ? JSON.parse(saved) : []);
         }
 
         // 4. Fetch medication logs (top-level collection: medications)
@@ -189,12 +173,12 @@ export default function App() {
           if (!medsSnap.empty) {
             setMedicationLogs(medsSnap.docs.map((d) => ({ id: d.id, ...d.data() } as MedicationLog)));
           } else {
-            setMedicationLogs(INITIAL_MEDICATION_LOGS);
+            setMedicationLogs([]);
           }
         } catch (err) {
           console.error("Error loading medication logs from Firestore:", err);
           const saved = localStorage.getItem("glyco_meds");
-          setMedicationLogs(saved ? JSON.parse(saved) : INITIAL_MEDICATION_LOGS);
+          setMedicationLogs(saved ? JSON.parse(saved) : []);
         }
 
         // 4b. Fetch insulin logs (top-level collection: insulin_records)
@@ -204,12 +188,12 @@ export default function App() {
           if (!insulinSnap.empty) {
             setInsulinLogs(insulinSnap.docs.map((d) => ({ id: d.id, ...d.data() } as InsulinLog)));
           } else {
-            setInsulinLogs(INITIAL_INSULIN_LOGS);
+            setInsulinLogs([]);
           }
         } catch (err) {
           console.error("Error loading insulin logs from Firestore:", err);
           const saved = localStorage.getItem("glyco_insulin");
-          setInsulinLogs(saved ? JSON.parse(saved) : INITIAL_INSULIN_LOGS);
+          setInsulinLogs(saved ? JSON.parse(saved) : []);
         }
 
         // 5. Fetch exercise logs (top-level collection: exercise_history)
@@ -219,12 +203,12 @@ export default function App() {
           if (!exercisesSnap.empty) {
             setExerciseLogs(exercisesSnap.docs.map((d) => ({ id: d.id, ...d.data() } as ExerciseLog)));
           } else {
-            setExerciseLogs(INITIAL_EXERCISE_LOGS);
+            setExerciseLogs([]);
           }
         } catch (err) {
           console.error("Error loading exercises from Firestore:", err);
           const saved = localStorage.getItem("glyco_exercises");
-          setExerciseLogs(saved ? JSON.parse(saved) : INITIAL_EXERCISE_LOGS);
+          setExerciseLogs(saved ? JSON.parse(saved) : []);
         }
 
         // 6. Fetch chat messages (top-level collection: ai_history)
@@ -247,11 +231,11 @@ export default function App() {
           const parsed = JSON.parse(savedOffline);
           setUser(parsed);
           const savedLocalProfile = localStorage.getItem("glyco_profile");
-          setProfile(savedLocalProfile ? JSON.parse(savedLocalProfile) : INITIAL_PROFILE);
-          setGlucoseLogs(localStorage.getItem("glyco_glucose") ? JSON.parse(localStorage.getItem("glyco_glucose")!) : INITIAL_GLUCOSE_LOGS);
-          setFoodLogs(localStorage.getItem("glyco_food") ? JSON.parse(localStorage.getItem("glyco_food")!) : INITIAL_FOOD_LOGS);
-          setMedicationLogs(localStorage.getItem("glyco_meds") ? JSON.parse(localStorage.getItem("glyco_meds")!) : INITIAL_MEDICATION_LOGS);
-          setExerciseLogs(localStorage.getItem("glyco_exercises") ? JSON.parse(localStorage.getItem("glyco_exercises")!) : INITIAL_EXERCISE_LOGS);
+          setProfile(savedLocalProfile ? JSON.parse(savedLocalProfile) : null);
+          setGlucoseLogs(localStorage.getItem("glyco_glucose") ? JSON.parse(localStorage.getItem("glyco_glucose")!) : []);
+          setFoodLogs(localStorage.getItem("glyco_food") ? JSON.parse(localStorage.getItem("glyco_food")!) : []);
+          setMedicationLogs(localStorage.getItem("glyco_meds") ? JSON.parse(localStorage.getItem("glyco_meds")!) : []);
+          setExerciseLogs(localStorage.getItem("glyco_exercises") ? JSON.parse(localStorage.getItem("glyco_exercises")!) : []);
           setChatMessages(localStorage.getItem("glyco_chat") ? JSON.parse(localStorage.getItem("glyco_chat")!) : INITIAL_CHAT_MESSAGES);
         } else {
           setUser(null);
@@ -492,14 +476,14 @@ export default function App() {
   const handleResetData = async () => {
     localStorage.clear();
     setProfile(null);
-    setGlucoseLogs(INITIAL_GLUCOSE_LOGS);
-    setFoodLogs(INITIAL_FOOD_LOGS);
-    setMedicationLogs(INITIAL_MEDICATION_LOGS);
-    setExerciseLogs(INITIAL_EXERCISE_LOGS);
+    setGlucoseLogs([]);
+    setFoodLogs([]);
+    setMedicationLogs([]);
+    setInsulinLogs([]);
+    setExerciseLogs([]);
     setChatMessages(INITIAL_CHAT_MESSAGES);
     setCurrentView("dashboard");
     if (user) {
-      // Clear user records in Firestore - simple deletion or let them start fresh
       try {
         const { deleteDoc, doc } = await import("firebase/firestore");
         await deleteDoc(doc(db, "users", user.uid));
@@ -511,15 +495,13 @@ export default function App() {
 
   // Determine current stats for grounding chat/AI
   const latestGlucose = glucoseLogs.length > 0 ? glucoseLogs[glucoseLogs.length - 1] : null;
-  const averageGlucose = Math.round(
-    glucoseLogs.length > 0
-      ? glucoseLogs.reduce((acc, log) => acc + log.value, 0) / glucoseLogs.length
-      : 120
-  );
+  const averageGlucose = glucoseLogs.length > 0
+    ? Math.round(glucoseLogs.reduce((acc, log) => acc + log.value, 0) / glucoseLogs.length)
+    : 0;
 
   const calculateTimeInRange = () => {
-    if (glucoseLogs.length === 0) return 100;
-    if (!profile) return 75;
+    if (glucoseLogs.length === 0) return 0;
+    if (!profile) return 0;
     const inRangeLogs = glucoseLogs.filter((log) => {
       const isJejum = log.type === "jejum" || log.type === "antes_dormir";
       const min = profile.targetGlucoseMinJejum || 70;
@@ -570,24 +552,17 @@ export default function App() {
     );
   }
 
-  const isAdmin = user.email === "nickinicolas380@gmail.com" || user.email === "nickinicolas380@gmil.com" || profile?.role === "admin";
-
   // Sidebar navigation configuration
   const navigationItems = [
     { id: "dashboard", label: "Painel Principal", icon: Activity },
     { id: "glicemia", label: "Controle Glicêmico", icon: Heart },
     { id: "alimentacao", label: "Alimentação Inteligente", icon: Apple },
     { id: "medicamentos", label: "Medicamentos & Insulina", icon: Pill },
-    { id: "exercicios", label: "Atividades Físicas", icon: Dumbbell },
     { id: "chat", label: "Copiloto IA", icon: Brain },
     { id: "relatorios", label: "Relatório Clínico", icon: Printer },
     { id: "subscription", label: "Assinatura Premium", icon: Sparkles },
     { id: "configuracoes", label: "Ajustes & Metas", icon: Settings },
   ];
-
-  if (isAdmin) {
-    navigationItems.push({ id: "admin", label: "Painel Admin", icon: ShieldCheck });
-  }
 
   return (
     <div id="app-root" className={`min-h-screen font-sans flex flex-col md:flex-row ${darkMode ? "dark bg-neutral-950 text-neutral-100" : "bg-neutral-50/50 text-neutral-800"}`}>
@@ -838,17 +813,6 @@ export default function App() {
             />
           )}
 
-          {currentView === "exercicios" && (
-            <ExerciciosView
-              logs={exerciseLogs}
-              onAddLog={handleAddExerciseLog}
-              onDeleteLog={handleDeleteExerciseLog}
-              profile={profile}
-              selectedExerciseId={selectedExerciseId}
-              onClearSelectedExercise={() => setSelectedExerciseId(null)}
-            />
-          )}
-
           {currentView === "chat" && (
             <ChatView
               messages={chatMessages}
@@ -858,10 +822,6 @@ export default function App() {
               currentStats={currentStats}
               isPremium={isPremium}
               onNavigateToSubscription={() => setCurrentView("subscription")}
-              onViewExercise={(exId) => {
-                setSelectedExerciseId(exId);
-                setCurrentView("exercicios");
-              }}
             />
           )}
 
@@ -931,14 +891,6 @@ export default function App() {
                   }
                 }
               }}
-            />
-          )}
-
-          {currentView === "admin" && isAdmin && (
-            <AdminPanel
-              adminEmail={user.email}
-              adminUid={user.uid}
-              onBackToApp={() => setCurrentView("dashboard")}
             />
           )}
 

@@ -97,9 +97,9 @@ export default function RelatoriosView({
 
   // Statistics calculation
   const totalLogs = filtered.glucose.length;
-  const averageGlucose = Math.round(
-    totalLogs > 0 ? filtered.glucose.reduce((acc, log) => acc + log.value, 0) / totalLogs : 120
-  );
+  const averageGlucose = totalLogs > 0
+    ? Math.round(filtered.glucose.reduce((acc, log) => acc + log.value, 0) / totalLogs)
+    : 0;
 
   // 7d and 30d averages
   const now = new Date();
@@ -109,8 +109,8 @@ export default function RelatoriosView({
   const avg7d = logs7d.length > 0 ? Math.round(logs7d.reduce((a, b) => a + b.value, 0) / logs7d.length) : averageGlucose;
   const avg30d = logs30d.length > 0 ? Math.round(logs30d.reduce((a, b) => a + b.value, 0) / logs30d.length) : averageGlucose;
 
-  const maxGlucose = totalLogs > 0 ? Math.max(...filtered.glucose.map((log) => log.value)) : 145;
-  const minGlucose = totalLogs > 0 ? Math.min(...filtered.glucose.map((log) => log.value)) : 78;
+  const maxGlucose = totalLogs > 0 ? Math.max(...filtered.glucose.map((log) => log.value)) : 0;
+  const minGlucose = totalLogs > 0 ? Math.min(...filtered.glucose.map((log) => log.value)) : 0;
 
   // Time in range
   const inRangeLogs = filtered.glucose.filter((log) => {
@@ -121,7 +121,7 @@ export default function RelatoriosView({
       : (profile.targetGlucoseMaxPosPrandial || 180);
     return log.value >= min && log.value <= max;
   }).length;
-  const timeInRange = totalLogs > 0 ? Math.round((inRangeLogs / totalLogs) * 100) : 100;
+  const timeInRange = totalLogs > 0 ? Math.round((inRangeLogs / totalLogs) * 100) : 0;
 
   // Hypo and Hyper counts
   const hypoglicemias = filtered.glucose.filter((l) => l.value < (profile.targetGlucoseMinJejum || 70)).length;

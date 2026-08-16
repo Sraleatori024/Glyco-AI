@@ -1,4 +1,4 @@
-import { doc, setDoc, deleteDoc, collection, getDocs, getDoc, serverTimestamp, query, where } from "firebase/firestore";
+import { doc, setDoc, deleteDoc, collection, getDocs, getDoc, serverTimestamp, query, where, increment } from "firebase/firestore";
 import { db, auth } from "./firebase";
 
 export enum OperationType {
@@ -90,6 +90,7 @@ export async function getOrCreateUserDoc(
         role: "user",
         plan: "free",
         subscriptionStatus: "inactive",
+        aiUsageCount: 0,
         diabetesType: null,
         weight: null,
         height: null,
@@ -114,6 +115,19 @@ export async function getOrCreateUserDoc(
     }
   } catch (err) {
     handleFirestoreError(err, OperationType.WRITE, `users/${uid}`);
+  }
+}
+
+// Increment AI usage count for a user safely in Firestore
+export async function incrementAiUsageCount(uid: string) {
+  try {
+    const docRef = doc(db, "users", uid);
+    await setDoc(docRef, {
+      aiUsageCount: increment(1),
+      updatedAt: new Date().toISOString()
+    }, { merge: true });
+  } catch (err) {
+    console.error("Error incrementing AI usage count:", err);
   }
 }
 

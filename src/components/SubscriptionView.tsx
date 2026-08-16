@@ -17,6 +17,7 @@ import {
 interface SubscriptionViewProps {
   currentPlan: string;
   subscriptionStatus: string;
+  aiUsageCount?: number;
   trialDaysRemaining?: number;
   isTrialExpired?: boolean;
   onUpgrade: (plan: "free" | "premium", period: "monthly" | "yearly") => Promise<void>;
@@ -27,6 +28,7 @@ interface SubscriptionViewProps {
 export default function SubscriptionView({ 
   currentPlan, 
   subscriptionStatus, 
+  aiUsageCount = 0,
   trialDaysRemaining = 7,
   isTrialExpired = false,
   onUpgrade, 
@@ -107,10 +109,13 @@ export default function SubscriptionView({
           <p className="text-xxs text-neutral-400 mt-1">
             {isPremium 
               ? "Parabéns! Você tem acesso ilimitado a todas as ferramentas clínicas."
-              : isTrialExpired
-                ? "Seu período de teste gratuito de 7 dias expirou. Assine para reativar o acesso total ao Glyco AI."
-                : `Você está aproveitando o teste gratuito de 7 dias (${trialDaysRemaining} dia(s) restante(s)). Assine agora para garantir acesso ininterrupto.`}
+              : `Sua conta inclui 2 análises gratuitas da Inteligência Artificial. Testes utilizados: ${aiUsageCount} de 2.`}
           </p>
+          {((import.meta as any).env?.DEV || (import.meta as any).env?.VITE_DEVELOPMENT_MODE === "true" || (import.meta as any).env?.VITE_DISABLE_AI_LIMITS === "true") && (
+            <div className="mt-2 inline-flex items-center gap-1.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2.5 py-0.5 rounded-full text-xxs font-black uppercase tracking-wider">
+              ⚡ Modo de Desenvolvimento (IA Ilimitada Ativa)
+            </div>
+          )}
         </div>
 
         <div className="flex gap-2">

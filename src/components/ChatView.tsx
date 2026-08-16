@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { Message, UserProfile } from "../types";
+import { incrementAiUsageCount } from "../firebaseUtils";
 import { Send, Sparkles, User, Brain, AlertTriangle, RefreshCw, Lock, Copy, Share2, Bookmark } from "lucide-react";
 
 interface ChatViewProps {
@@ -35,8 +36,9 @@ export default function ChatView({
   const [loading, setLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  const userMessagesCount = messages.filter((m) => m.sender === "user").length;
-  const isChatLimitReached = !isPremium && userMessagesCount >= 4;
+  const isDevMode = (import.meta as any).env?.DEV || (import.meta as any).env?.VITE_DEVELOPMENT_MODE === "true" || (import.meta as any).env?.VITE_DISABLE_AI_LIMITS === "true";
+  const usedCount = profile?.aiUsageCount || 0;
+  const isChatLimitReached = !isDevMode && !isPremium && usedCount >= 2;
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -50,7 +52,11 @@ export default function ChatView({
     if (!textToSend.trim()) return;
 
     if (isChatLimitReached) {
-      alert("Limite de chat gratuito atingido. Assine o plano Premium para conversas ilimitadas.");
+      if (onNavigateToSubscription) {
+        onNavigateToSubscription();
+      } else {
+        alert("Sua conta atingiu o limite de 2 utilizações gratuitas da Inteligência Artificial. Por favor, assine o plano Premium para acesso ilimitado.");
+      }
       return;
     }
 
@@ -90,9 +96,17 @@ export default function ChatView({
             try {
               const errData = await res.json();
               if (errData.message) lastErrorMsg = errData.message;
-            } catch (_) {}
+              if (res.status === 403 || errData.code === "TRIAL_EXHAUSTED") {
+                if (profile) profile.aiUsageCount = errData.aiUsageCount || 2;
+                if (onNavigateToSubscription) onNavigateToSubscription();
+                throw new Error(errData.message || "Sua conta atingiu o limite de 2 utilizações gratuitas da Inteligência Artificial.");
+              }
+            } catch (jsonErr: any) {
+              if (jsonErr.message && jsonErr.message.includes("2 utilizações")) throw jsonErr;
+            }
           }
         } catch (err: any) {
+          if (err.message && err.message.includes("2 utilizações")) throw err;
           console.warn(`[CHAT RETRY] Falha no endpoint ${endpoint}:`, err);
         }
       }
@@ -103,6 +117,10 @@ export default function ChatView({
 
       const data = await response.json();
       onReceiveAssistantMessage(data.text);
+
+      if (typeof data.aiUsageCount === "number" && profile) {
+        profile.aiUsageCount = data.aiUsageCount;
+      }
     } catch (error: any) {
       console.error("Erro no chat inteligente:", error);
       const userFacingMsg = error.message && error.message.includes("GEMINI_API_KEY") 
@@ -256,7 +274,7 @@ export default function ChatView({
                 <span className="text-xs font-black uppercase tracking-wider">Limite do Assistente IA Atingido</span>
               </div>
               <p className="text-[11px] text-neutral-400 max-w-md mx-auto leading-relaxed">
-                Você enviou {userMessagesCount} mensagens gratuitas. Assine o **Plano Premium** para continuar tirando dúvidas sobre nutrição, receitas e comportamento glicêmico sem restrições.
+                Você utilizou {usedCount} de 2 testes gratuitos do assistente. Assine o **Plano Premium** para continuar tirando dúvidas sobre nutrição, receitas e comportamento glicêmico sem restrições.
               </p>
               <button
                 type="button"

@@ -842,6 +842,7 @@ export default function App() {
             <SubscriptionView
               currentPlan={isPaidSubscriber ? "premium" : "free"}
               subscriptionStatus={isPaidSubscriber ? "active" : "inactive"}
+              aiUsageCount={profile?.aiUsageCount || 0}
               trialDaysRemaining={daysRemaining}
               isTrialExpired={isTrialExpired}
               onUpgrade={async (plan, period) => {

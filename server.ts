@@ -1,10 +1,156 @@
 import express from "express";
 import path from "path";
+import fs from "fs";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
+import { initializeApp, getApps, getApp } from "firebase/app";
+import { getFirestore, doc, runTransaction } from "firebase/firestore";
 
 dotenv.config();
+
+// Initialize Firebase server instance for secure server-side rate limiting
+let serverDb: any = null;
+
+try {
+  const configPath = path.join(process.cwd(), "firebase-applet-config.json");
+  if (fs.existsSync(configPath)) {
+    const rawConfig = fs.readFileSync(configPath, "utf8");
+    const firebaseConfig = JSON.parse(rawConfig);
+    
+    const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
+    const customDbId = process.env.VITE_FIREBASE_DATABASE_ID || firebaseConfig.firestoreDatabaseId;
+    serverDb = (customDbId && customDbId.trim() !== "" && customDbId !== "(default)")
+      ? getFirestore(app, customDbId)
+      : getFirestore(app);
+    console.log("[SERVER FIRESTORE INIT]: Banco de dados Firestore inicializado no servidor com sucesso.");
+  } else {
+    console.warn("[SERVER FIRESTORE INIT]: firebase-applet-config.json não encontrado no servidor.");
+  }
+} catch (err) {
+  console.error("[SERVER FIRESTORE INIT ERROR]:", err);
+}
+
+interface ReservationResult {
+  allowed: boolean;
+  isDevMode: boolean;
+  isPremium: boolean;
+  currentUsage: number;
+  reason?: string;
+  uid?: string;
+  reserved: boolean;
+}
+
+// Helper to check and reserve AI slot atomically in Firestore on the server
+async function reserveAiSlot(uid: string | undefined, userProfile?: any): Promise<ReservationResult> {
+  // 1. Check server-side DEVELOPMENT_MODE flag
+  const isDevMode = 
+    process.env.DEVELOPMENT_MODE === "true" ||
+    process.env.VITE_DEVELOPMENT_MODE === "true" ||
+    process.env.DISABLE_AI_LIMITS === "true";
+
+  if (isDevMode) {
+    console.log("[SERVER AI LIMIT]: DEVELOPMENT_MODE ativo no servidor. Acesso ilimitado à IA liberado.");
+    return { allowed: true, isDevMode: true, isPremium: false, currentUsage: 0, reserved: false };
+  }
+
+  const userId = uid || userProfile?.uid;
+  const isPayloadPremium = userProfile?.plan === "premium" || userProfile?.subscriptionStatus === "active";
+
+  if (!userId) {
+    if (isPayloadPremium) {
+      return { allowed: true, isDevMode: false, isPremium: true, currentUsage: 0, reserved: false };
+    }
+    return {
+      allowed: false,
+      isDevMode: false,
+      isPremium: false,
+      currentUsage: 2,
+      reason: "UID do usuário ausente na requisição.",
+      reserved: false
+    };
+  }
+
+  if (!serverDb) {
+    // If Firestore server instance is unavailable, fallback safely
+    const usage = typeof userProfile?.aiUsageCount === "number" ? userProfile.aiUsageCount : 0;
+    if (isPayloadPremium || usage < 2) {
+      return { allowed: true, isDevMode: false, isPremium: isPayloadPremium, currentUsage: usage, uid: userId, reserved: false };
+    }
+    return { allowed: false, isDevMode: false, isPremium: false, currentUsage: usage, reason: "TRIAL_EXHAUSTED", reserved: false };
+  }
+
+  // 2. Perform atomic transaction on Firestore
+  try {
+    const userRef = doc(serverDb, "users", userId);
+    
+    return await runTransaction(serverDb, async (transaction) => {
+      const snap = await transaction.get(userRef);
+      if (!snap.exists()) {
+        // User doc doesn't exist yet, create with 1 reserved usage
+        transaction.set(userRef, {
+          aiUsageCount: 1,
+          plan: userProfile?.plan || "free",
+          subscriptionStatus: userProfile?.subscriptionStatus || "inactive",
+          updatedAt: new Date().toISOString()
+        }, { merge: true });
+        return { allowed: true, isDevMode: false, isPremium: false, currentUsage: 1, uid: userId, reserved: true };
+      }
+
+      const data = snap.data();
+      const isDbPremium = data.plan === "premium" || data.subscriptionStatus === "active";
+      const currentUsage = typeof data.aiUsageCount === "number" ? data.aiUsageCount : 0;
+
+      if (isDbPremium) {
+        return { allowed: true, isDevMode: false, isPremium: true, currentUsage, uid: userId, reserved: false };
+      }
+
+      if (currentUsage >= 2) {
+        return { allowed: false, isDevMode: false, isPremium: false, currentUsage, reason: "TRIAL_EXHAUSTED", uid: userId, reserved: false };
+      }
+
+      // Safe to reserve slot! Increment count atomically in transaction
+      const newUsage = currentUsage + 1;
+      transaction.update(userRef, {
+        aiUsageCount: newUsage,
+        updatedAt: new Date().toISOString()
+      });
+
+      return { allowed: true, isDevMode: false, isPremium: false, currentUsage: newUsage, uid: userId, reserved: true };
+    });
+  } catch (err) {
+    console.error("[SERVER AI LIMIT TRANSACTION ERROR]:", err);
+    const usage = typeof userProfile?.aiUsageCount === "number" ? userProfile.aiUsageCount : 0;
+    if (isPayloadPremium || usage < 2) {
+      return { allowed: true, isDevMode: false, isPremium: isPayloadPremium, currentUsage: usage, uid: userId, reserved: false };
+    }
+    return { allowed: false, isDevMode: false, isPremium: false, currentUsage: usage, reason: "TRIAL_EXHAUSTED", reserved: false };
+  }
+}
+
+// Rollback helper if Gemini API fails after slot was reserved
+async function rollbackAiSlot(uid: string | undefined) {
+  if (!uid || !serverDb) return;
+  try {
+    const userRef = doc(serverDb, "users", uid);
+    await runTransaction(serverDb, async (transaction) => {
+      const snap = await transaction.get(userRef);
+      if (snap.exists()) {
+        const data = snap.data();
+        const currentUsage = typeof data.aiUsageCount === "number" ? data.aiUsageCount : 0;
+        if (currentUsage > 0) {
+          transaction.update(userRef, {
+            aiUsageCount: currentUsage - 1,
+            updatedAt: new Date().toISOString()
+          });
+        }
+      }
+    });
+    console.log(`[SERVER AI ROLLBACK]: Uso de IA estornado no Firestore para o usuário ${uid}`);
+  } catch (err) {
+    console.error("[SERVER AI ROLLBACK ERROR]:", err);
+  }
+}
 
 const app = express();
 const PORT = 3000;
@@ -126,16 +272,36 @@ apiRouter.get(["/health", "/gemini/health", "/api/health", "/api/gemini/health"]
 // 1. Endpoint for automatic trend & pattern analysis of patient's history
 apiRouter.post(["/gemini/analyze-history", "/analyze-history", "/ai-analysis", "/api/gemini/analyze-history", "/api/analyze-history", "/api/ai-analysis"], async (req: any, res: any) => {
   const startTime = Date.now();
+  let reservedSlot = false;
+  let targetUid: string | undefined = undefined;
+
   console.log(`\n--- [INÍCIO /api/gemini/analyze-history] ---`);
   console.log(`[CLIENTE]: ${req.headers["user-agent"] || "mobile"}`);
 
   try {
     const customApiKey = req.headers["x-gemini-api-key"] || req.body?.apiKey;
     const { profile, glucoseLogs, foodLogs, medicationLogs } = req.body || {};
+    const uid = req.headers["x-user-uid"] || req.body?.uid || profile?.uid;
+    targetUid = uid;
 
     if (!profile) {
       return res.status(400).json({ error: "Perfil de usuário é obrigatório." });
     }
+
+    // 1. Server-Side AI Quota Verification & Atomic Reservation
+    const limitCheck = await reserveAiSlot(uid, profile);
+    if (!limitCheck.allowed) {
+      console.warn(`[AI LIMIT BLOCKED /analyze-history]: Usuário ${uid || "desconhecido"} bloqueado no servidor. Limite atingido.`);
+      return res.status(403).json({
+        error: "TRIAL_EXHAUSTED",
+        code: "TRIAL_EXHAUSTED",
+        message: "Sua conta atingiu o limite de 2 utilizações gratuitas da Inteligência Artificial. Assine o plano Premium para acesso ilimitado.",
+        aiUsageCount: limitCheck.currentUsage,
+        statusCode: 403
+      });
+    }
+
+    reservedSlot = limitCheck.reserved;
 
     const systemPrompt = `Você é um endocrinologista experiente e especialista em saúde digital.
 Analise os dados históricos do paciente com diabetes e gere insights acionáveis, padrões e estatísticas em português (Brasil).
@@ -220,10 +386,17 @@ Retorne os resultados em um formato JSON estruturado para exibição fluida no d
     });
 
     const resultText = response.text || "{}";
+    const parsedData = JSON.parse(resultText);
     console.log(`[FIM SUCESSO analyze-history]: Tempo: ${Date.now() - startTime}ms`);
-    res.json(JSON.parse(resultText));
+    res.json({
+      ...parsedData,
+      aiUsageCount: limitCheck.currentUsage
+    });
   } catch (error: any) {
     console.error("[ERRO analyze-history]:", error.message || error);
+    if (reservedSlot && targetUid) {
+      await rollbackAiSlot(targetUid);
+    }
     res.status(500).json({
       error: "Erro na Análise do Histórico",
       message: error.message || "Erro interno ao processar histórico do paciente.",
@@ -235,16 +408,36 @@ Retorne os resultados em um formato JSON estruturado para exibição fluida no d
 // 2. Endpoint for smart chat conversations (Copilot)
 apiRouter.post(["/gemini/chat", "/chat", "/copilot", "/api/gemini/chat", "/api/chat", "/api/copilot"], async (req: any, res: any) => {
   const startTime = Date.now();
+  let reservedSlot = false;
+  let targetUid: string | undefined = undefined;
+
   console.log(`\n--- [INÍCIO /api/gemini/chat / copilot] ---`);
   console.log(`[CLIENTE]: ${req.headers["user-agent"] || "mobile"}`);
 
   try {
     const customApiKey = req.headers["x-gemini-api-key"] || req.body?.apiKey;
     const { messages, profile, currentStats } = req.body || {};
+    const uid = req.headers["x-user-uid"] || req.body?.uid || profile?.uid;
+    targetUid = uid;
 
     if (!messages || !Array.isArray(messages)) {
       return res.status(400).json({ error: "Histórico de mensagens é obrigatório." });
     }
+
+    // 1. Server-Side AI Quota Verification & Atomic Reservation
+    const limitCheck = await reserveAiSlot(uid, profile);
+    if (!limitCheck.allowed) {
+      console.warn(`[AI LIMIT BLOCKED /chat]: Usuário ${uid || "desconhecido"} bloqueado no servidor. Limite atingido.`);
+      return res.status(403).json({
+        error: "TRIAL_EXHAUSTED",
+        code: "TRIAL_EXHAUSTED",
+        message: "Sua conta atingiu o limite de 2 utilizações gratuitas da Inteligência Artificial. Assine o plano Premium para acesso ilimitado.",
+        aiUsageCount: limitCheck.currentUsage,
+        statusCode: 403
+      });
+    }
+
+    reservedSlot = limitCheck.reserved;
 
     const systemInstruction = `Você é o Assistente Virtual da Glyco AI, um companheiro inteligente de suporte para diabetes.
 Use as seguintes regras cruciais de comportamento:
@@ -281,9 +474,15 @@ Tempo no alvo: ${currentStats?.timeInRange || "75"}%
     });
 
     console.log(`[FIM SUCESSO chat]: Resposta gerada em ${Date.now() - startTime}ms`);
-    res.json({ text: response.text });
+    res.json({
+      text: response.text,
+      aiUsageCount: limitCheck.currentUsage
+    });
   } catch (error: any) {
     console.error("[ERRO chat]:", error.message || error);
+    if (reservedSlot && targetUid) {
+      await rollbackAiSlot(targetUid);
+    }
     res.status(500).json({
       error: "Erro no Chat Inteligente",
       message: error.message || "Erro interno do servidor no chat.",
@@ -295,15 +494,35 @@ Tempo no alvo: ${currentStats?.timeInRange || "75"}%
 // 2.5. Endpoint for smart exercise daily plan generation
 apiRouter.post(["/gemini/exercise-plan", "/exercise-plan", "/api/gemini/exercise-plan"], async (req: any, res: any) => {
   const startTime = Date.now();
+  let reservedSlot = false;
+  let targetUid: string | undefined = undefined;
+
   console.log(`\n--- [INÍCIO /api/gemini/exercise-plan] ---`);
 
   try {
     const customApiKey = req.headers["x-gemini-api-key"] || req.body?.apiKey;
     const { profile, currentStats, recentGlucoseLogs } = req.body || {};
+    const uid = req.headers["x-user-uid"] || req.body?.uid || profile?.uid;
+    targetUid = uid;
 
     if (!profile) {
       return res.status(400).json({ error: "Perfil do usuário é obrigatório." });
     }
+
+    // 1. Server-Side AI Quota Verification & Atomic Reservation
+    const limitCheck = await reserveAiSlot(uid, profile);
+    if (!limitCheck.allowed) {
+      console.warn(`[AI LIMIT BLOCKED /exercise-plan]: Usuário ${uid || "desconhecido"} bloqueado no servidor. Limite atingido.`);
+      return res.status(403).json({
+        error: "TRIAL_EXHAUSTED",
+        code: "TRIAL_EXHAUSTED",
+        message: "Sua conta atingiu o limite de 2 utilizações gratuitas da Inteligência Artificial. Assine o plano Premium para acesso ilimitado.",
+        aiUsageCount: limitCheck.currentUsage,
+        statusCode: 403
+      });
+    }
+
+    reservedSlot = limitCheck.reserved;
 
     const systemPrompt = `Você é um educador físico e especialista médico em diabetes. 
 Sua tarefa é montar um Plano de Exercícios ("Plano do Dia") personalizado e seguro em português brasileiro.
@@ -371,10 +590,17 @@ Retorne as informações em um formato JSON válido estruturado para renderizaç
     });
 
     const resultText = response.text || "{}";
+    const parsedData = JSON.parse(resultText);
     console.log(`[FIM SUCESSO exercise-plan]: Tempo: ${Date.now() - startTime}ms`);
-    res.json(JSON.parse(resultText));
+    res.json({
+      ...parsedData,
+      aiUsageCount: limitCheck.currentUsage
+    });
   } catch (error: any) {
     console.error("[ERRO exercise-plan]:", error.message || error);
+    if (reservedSlot && targetUid) {
+      await rollbackAiSlot(targetUid);
+    }
     res.status(500).json({
       error: "Erro no Plano de Exercícios",
       message: error.message || "Erro interno do servidor ao gerar plano de exercícios.",
@@ -387,6 +613,9 @@ Retorne as informações em um formato JSON válido estruturado para renderizaç
 apiRouter.post(["/gemini/analyze-food", "/analyze-food", "/analyze-food-photo", "/food-analysis", "/api/gemini/analyze-food", "/api/analyze-food", "/api/analyze-food-photo", "/api/food-analysis"], async (req: any, res: any) => {
   const startTime = Date.now();
   let foodDescription = "";
+  let reservedSlot = false;
+  let targetUid: string | undefined = undefined;
+
   console.log(`\n--- [INÍCIO /api/gemini/analyze-food] ---`);
   console.log(`[CLIENTE]: ${req.headers["user-agent"] || "mobile"}`);
 
@@ -394,6 +623,8 @@ apiRouter.post(["/gemini/analyze-food", "/analyze-food", "/analyze-food-photo", 
     const customApiKey = req.headers["x-gemini-api-key"] || req.body?.apiKey;
     const { foodDescription: desc, base64Image, profile } = req.body || {};
     foodDescription = desc || "";
+    const uid = req.headers["x-user-uid"] || req.body?.uid || profile?.uid;
+    targetUid = uid;
 
     if (!foodDescription && !base64Image) {
       return res.status(400).json({
@@ -404,9 +635,25 @@ apiRouter.post(["/gemini/analyze-food", "/analyze-food", "/analyze-food-photo", 
       });
     }
 
+    // 1. Server-Side AI Quota Verification & Atomic Reservation
+    const limitCheck = await reserveAiSlot(uid, profile);
+    if (!limitCheck.allowed) {
+      console.warn(`[AI LIMIT BLOCKED /analyze-food]: Usuário ${uid || "desconhecido"} bloqueado no servidor. Limite atingido.`);
+      return res.status(403).json({
+        error: "TRIAL_EXHAUSTED",
+        code: "TRIAL_EXHAUSTED",
+        message: "Sua conta atingiu o limite de 2 utilizações gratuitas da Inteligência Artificial. Assine o plano Premium para acesso ilimitado.",
+        aiUsageCount: limitCheck.currentUsage,
+        statusCode: 403
+      });
+    }
+
+    reservedSlot = limitCheck.reserved;
+
     const apiKey = process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY;
     if (!apiKey) {
       console.error("[ERRO VERCEL]: GEMINI_API_KEY não encontrada nas variáveis de ambiente!");
+      if (reservedSlot && targetUid) await rollbackAiSlot(targetUid);
       return res.status(500).json({
         error: "Chave do Gemini Não Configurada",
         message: "A chave de API GEMINI_API_KEY não foi configurada nas variáveis de ambiente do Vercel.",
@@ -438,6 +685,7 @@ Usa Insulina? ${profile?.usesInsulin ? "Sim" : "Não"}
       const cleanBase64 = parts[1];
 
       if (!cleanBase64 || cleanBase64.length < 50) {
+        if (reservedSlot && targetUid) await rollbackAiSlot(targetUid);
         return res.status(400).json({
           error: "Formato de Imagem Inválido",
           message: "A foto enviada possui formato Base64 corrompido ou incompleto.",
@@ -553,6 +801,9 @@ Depois, forneça as estimativas nutricionais realistas e o impacto esperado para
 
     if (isUnrecognized && base64Image) {
       console.warn(`[RECONHECIMENTO INCOMPLETO]: Nenhum alimento identificado na imagem.`);
+      if (reservedSlot && targetUid) {
+        await rollbackAiSlot(targetUid);
+      }
       return res.status(422).json({
         error: "Foto Não Reconhecida",
         message: "A Inteligência Artificial não conseguiu identificar nenhum alimento visível nesta foto. Por favor, envie uma foto bem iluminada e focada no prato de comida.",
@@ -563,7 +814,10 @@ Depois, forneça as estimativas nutricionais realistas e o impacto esperado para
     }
 
     console.log(`[FIM SUCESSO analyze-food]: Concluído em ${duration}ms`);
-    res.json(parsedResult);
+    res.json({
+      ...parsedResult,
+      aiUsageCount: limitCheck.currentUsage
+    });
   } catch (error: any) {
     const elapsedTime = Date.now() - startTime;
     const errMsg = String(error.message || error);
@@ -583,6 +837,10 @@ Depois, forneça as estimativas nutricionais realistas e o impacto esperado para
     }
 
     console.error(`[ERRO CRÍTICO analyze-food]: ${errMsg} (Status: ${statusCode}, Tempo: ${elapsedTime}ms)`);
+
+    if (reservedSlot && targetUid) {
+      await rollbackAiSlot(targetUid);
+    }
 
     res.status(statusCode).json({
       error: "Falha na Análise da Foto / Refeição",

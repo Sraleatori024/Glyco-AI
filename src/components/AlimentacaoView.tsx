@@ -1,5 +1,6 @@
 import React, { useState, useRef } from "react";
 import { FoodLog, UserProfile, FoodNutrition } from "../types";
+import { incrementAiUsageCount } from "../firebaseUtils";
 import { motion, AnimatePresence } from "motion/react";
 import { Apple, Upload, Image as ImageIcon, Send, RefreshCw, Sparkles, CheckCircle2, ChevronRight, HelpCircle, Flame, Camera, AlertTriangle, X, AlertCircle, ShieldAlert } from "lucide-react";
 
@@ -193,7 +194,11 @@ export default function AlimentacaoView({
 
   // Run the full-stack Gemini analysis
   const handleAnalyze = async () => {
-    if (!isPremium) {
+    const isDevMode = (import.meta as any).env?.DEV || (import.meta as any).env?.VITE_DEVELOPMENT_MODE === "true" || (import.meta as any).env?.VITE_DISABLE_AI_LIMITS === "true";
+    const usedCount = profile?.aiUsageCount || 0;
+    const canUseAI = isDevMode || isPremium || usedCount < 2;
+
+    if (!canUseAI) {
       setShowPremiumPrompt(true);
       return;
     }
@@ -253,6 +258,12 @@ export default function AlimentacaoView({
               lastErrMessage = errData.message || lastErrMessage;
               lastErrDetails = errData.details;
               if (errData.statusCode) lastStatusCode = errData.statusCode;
+
+              if (res.status === 403 || errData.code === "TRIAL_EXHAUSTED" || errData.error === "TRIAL_EXHAUSTED") {
+                setShowPremiumPrompt(true);
+                if (profile) profile.aiUsageCount = errData.aiUsageCount || 2;
+                break;
+              }
             } catch (_) {
               try {
                 const txt = await res.text();
@@ -266,18 +277,26 @@ export default function AlimentacaoView({
       }
 
       if (!response || !response.ok) {
-        setAnalysisError({
-          title: lastErrTitle,
-          source: lastErrSource,
-          message: lastErrMessage,
-          statusCode: lastStatusCode,
-          details: lastErrDetails
-        });
+        if (lastStatusCode === 403) {
+          setShowPremiumPrompt(true);
+        } else {
+          setAnalysisError({
+            title: lastErrTitle,
+            source: lastErrSource,
+            message: lastErrMessage,
+            statusCode: lastStatusCode,
+            details: lastErrDetails
+          });
+        }
         return;
       }
 
       const result = await response.json();
       setAnalysisResult(result);
+
+      if (typeof result.aiUsageCount === "number" && profile) {
+        profile.aiUsageCount = result.aiUsageCount;
+      }
     } catch (error: any) {
       console.error("Erro na análise nutricional:", error);
       let title = "Erro de Conexão com o Servidor";

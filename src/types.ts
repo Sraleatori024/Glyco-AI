@@ -8,6 +8,7 @@ export interface UserProfile {
   role?: string;
   plan?: string;
   subscriptionStatus?: string;
+  aiUsageCount?: number;
   createdAt?: string;
   updatedAt?: string;
 

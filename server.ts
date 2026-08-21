@@ -1,7 +1,6 @@
 import express from "express";
 import path from "path";
 import fs from "fs";
-import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
 import { initializeApp, getApps, getApp } from "firebase/app";
@@ -1021,6 +1020,7 @@ if (process.env.VERCEL !== "1") {
   async function setupViteOrStatic() {
     if (process.env.NODE_ENV !== "production") {
       console.log("Iniciando servidor Express em modo Desenvolvimento com Vite...");
+      const { createServer: createViteServer } = await import("vite");
       const vite = await createViteServer({
         server: { middlewareMode: true },
         appType: "spa",

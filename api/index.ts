@@ -472,35 +472,32 @@ apiRouter.post(["/gemini/chat", "/chat", "/copilot", "/api/gemini/chat", "/api/c
 
     reservedSlot = limitCheck.reserved;
 
-    const systemInstruction = `Você é o Assistente Virtual da Glyco AI, um companheiro inteligente de suporte para diabetes.
-Use as seguintes regras cruciais de comportamento:
-1. Responda de forma extremamente empática, objetiva, moderna e acolhedora em português (Brasil).
-2. Leve em consideração o perfil clínico do paciente fornecido, suas estatísticas e as refeições recentes.
-3. Se o paciente perguntar sobre alimentação (ex: "Posso comer pizza?", ou "O que achei do meu almoço?"), forneça conselhos práticos e nutricionais inteligentes, explicando sobre moderação, contagem de carboidratos, ordem dos alimentos (comer fibras/proteínas antes) e o impacto esperado, sem proibicionismo punitivo.
-4. Se o usuário estiver relatando sintomas de hipoglicemia (tontura, suor frio, tremores), oriente IMEDIATAMENTE a regra dos 15g de carboidratos rápidos (ex: 150ml de refrigerante comum ou suco de laranja) e medir novamente em 15 minutos.
-5. Sempre exiba um pequeno lembrete humilde de que suas respostas são informativas e não substituem o médico do paciente.
-6. EVITE repetição de frases, mensagens prontas ou respostas genéricas. Cada interação deve ser totalmente dinâmica e adaptada especificamente ao conteúdo e tom da pergunta atual.`;
+    // Direct, concise, fast and mobile-friendly system instruction for the Copilot AI
+    const systemInstruction = `Você é o Copiloto AI do Glyco AI, focado em suporte clínico e nutricional rápido e direto para diabetes em português (Brasil).
 
+DIRETRIZES OBRIGATÓRIAS DE RESPOSTA:
+1. Seja DIRETO, PRÁTICO e CONCISO. Vá direto ao ponto já na primeira frase, respondendo com precisão à dúvida do usuário.
+2. Tamanho ideal: de 3 a 8 frases ou poucos tópicos objetivos com bullets curtos (fácil de ler no celular).
+3. Se a pergunta for sobre um alimento/refeição: informe imediatamente o impacto glicêmico, carboidratos e dê 2 a 3 dicas práticas (ex: porção moderada, comer salada/proteína antes, caminhar 15 min).
+4. Se houver sintomas de hipoglicemia (suor frio, tontura, tremores): oriente de imediato a regra dos 15g de carboidrato rápido (150ml suco/refrigerante comum) e medir em 15 min.
+5. PROIBIDO: introduções genéricas ("Olá! Como vai?", "Que excelente pergunta!"), rodeios, enrolação ou conclusões longas.
+6. Termine com no máximo uma linha discreta de aviso médico caso aplicável.`;
+
+    // Compact context payload to reduce token count and latency
+    const medsList = Array.isArray(profile?.medications) && profile.medications.length > 0
+      ? profile.medications.join(", ")
+      : "Nenhum";
+    
     const mealsContextStr = Array.isArray(recentMeals) && recentMeals.length > 0
-      ? recentMeals.slice(0, 4).map((m: any) => `- ${m.nutrition?.foodName || m.description || "Refeição"}: ${m.nutrition?.carbohydrates || 0}g carbos, Carga Glicêmica: ${m.nutrition?.glycemicLoad || "N/A"}`).join('\n')
-      : "Nenhuma refeição registrada hoje.";
+      ? recentMeals.slice(0, 2).map((m: any) => `${m.nutrition?.foodName || m.description || "Refeição"} (${m.nutrition?.carbohydrates || 0}g carb)`).join("; ")
+      : "Nenhuma hoje";
 
-    const contextData = `
---- CONTEXTO DO PACIENTE ---
-Nome: ${profile?.name || "Paciente"}
-Tipo de Diabetes: ${profile?.diabetesType || "Tipo 2"}
-Insulina: ${profile?.usesInsulin ? "Sim" : "Não"}
-Medicamentos: ${JSON.stringify(profile?.medications || [])}
-Média recente de glicemia: ${currentStats?.averageGlucose || "135"} mg/dL
-Tempo no alvo: ${currentStats?.timeInRange || "75"}%
-Metas glicêmicas: Jejum ${profile?.targetGlucoseMinJejum || 70}-${profile?.targetGlucoseMaxJejum || 130} mg/dL | Pós-prandial até ${profile?.targetGlucoseMaxPosPrandial || 180} mg/dL
-Refeições recentes do diário:
-${mealsContextStr}
-`;
+    const contextData = `[Paciente: ${profile?.name || "Usuário"}, Diabetes: ${profile?.diabetesType || "Tipo 2"}, Insulina: ${profile?.usesInsulin ? "Sim" : "Não"}, Medicamentos: ${medsList}, Média Glicêmica: ${currentStats?.averageGlucose || 135} mg/dL, Tempo no Alvo: ${currentStats?.timeInRange || 75}%, Refeições recentes: ${mealsContextStr}]`;
 
-    const fullInstruction = `${systemInstruction}\n\n${contextData}`;
+    const fullInstruction = `${systemInstruction}\n\nContexto Atual: ${contextData}`;
 
-    const chatContents = messages.map((msg: any) => ({
+    // Send only the most relevant recent messages (last 6) to keep prompt lightweight and blazing fast
+    const chatContents = messages.slice(-6).map((msg: any) => ({
       role: msg.sender === "user" ? "user" : "model",
       parts: [{ text: msg.text }]
     }));
@@ -510,6 +507,8 @@ ${mealsContextStr}
       contents: chatContents,
       config: {
         systemInstruction: fullInstruction,
+        temperature: 0.4,
+        maxOutputTokens: 600,
       }
     });
 

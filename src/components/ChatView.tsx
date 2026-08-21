@@ -74,10 +74,29 @@ export default function ChatView({
       ];
 
       const payload = JSON.stringify({
-        messages: updatedMessages.slice(-10), // send last 10 messages for context
-        profile,
-        currentStats,
-        recentMeals: recentMeals?.slice(0, 4),
+        messages: updatedMessages.slice(-6), // Send last 6 messages for ultra-fast context
+        profile: {
+          name: profile?.name,
+          diabetesType: profile?.diabetesType,
+          usesInsulin: profile?.usesInsulin,
+          medications: profile?.medications,
+          aiUsageCount: profile?.aiUsageCount,
+          plan: profile?.plan,
+          subscriptionStatus: profile?.subscriptionStatus,
+          uid: profile?.uid,
+        },
+        currentStats: {
+          averageGlucose: currentStats?.averageGlucose,
+          timeInRange: currentStats?.timeInRange,
+        },
+        recentMeals: recentMeals?.slice(0, 2).map((m) => ({
+          description: m.description,
+          nutrition: {
+            foodName: m.nutrition?.foodName,
+            carbohydrates: m.nutrition?.carbohydrates,
+            glycemicLoad: m.nutrition?.glycemicLoad,
+          }
+        })),
       });
 
       const chatEndpoints = ["/api/gemini/chat", "/api/copilot", "/api/chat", "/copilot", "/chat"];

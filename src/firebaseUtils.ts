@@ -78,18 +78,32 @@ export async function getOrCreateUserDoc(
   try {
     const docRef = doc(db, "users", uid);
     const docSnap = await getDoc(docRef);
+    const cleanEmail = (email || "").toLowerCase().trim();
+    const isAdmin = cleanEmail === "nickinicolas380@gmail.com";
 
     if (docSnap.exists()) {
-      return docSnap.data();
+      const data = docSnap.data();
+      if (isAdmin && (data.role !== "admin" || data.plan !== "admin")) {
+        const updated = {
+          ...data,
+          role: "admin",
+          plan: "admin",
+          subscriptionStatus: "active",
+          updatedAt: new Date().toISOString()
+        };
+        await setDoc(docRef, updated, { merge: true });
+        return updated;
+      }
+      return data;
     } else {
       const initialUser = {
         uid,
-        name: displayName || email.split("@")[0] || "Usuário",
+        name: displayName || (email ? email.split("@")[0] : "Usuário"),
         email,
         photoURL: photoURL || null,
-        role: "user",
-        plan: "free",
-        subscriptionStatus: "inactive",
+        role: isAdmin ? "admin" : "user",
+        plan: isAdmin ? "admin" : "free",
+        subscriptionStatus: isAdmin ? "active" : "inactive",
         aiUsageCount: 0,
         diabetesType: null,
         weight: null,

@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { Message, UserProfile } from "../types";
+import { Message, UserProfile, FoodLog } from "../types";
 import { incrementAiUsageCount } from "../firebaseUtils";
 import { Send, Sparkles, User, Brain, AlertTriangle, RefreshCw, Lock, Copy, Share2, Bookmark } from "lucide-react";
 
@@ -12,6 +12,7 @@ interface ChatViewProps {
     averageGlucose: number;
     timeInRange: number;
   };
+  recentMeals?: FoodLog[];
   isPremium: boolean;
   onNavigateToSubscription?: () => void;
 }
@@ -29,6 +30,7 @@ export default function ChatView({
   onReceiveAssistantMessage,
   profile,
   currentStats,
+  recentMeals,
   isPremium,
   onNavigateToSubscription,
 }: ChatViewProps) {
@@ -75,6 +77,7 @@ export default function ChatView({
         messages: updatedMessages.slice(-10), // send last 10 messages for context
         profile,
         currentStats,
+        recentMeals: recentMeals?.slice(0, 4),
       });
 
       const chatEndpoints = ["/api/gemini/chat", "/api/copilot", "/api/chat", "/copilot", "/chat"];

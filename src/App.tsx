@@ -81,12 +81,15 @@ export default function App() {
 
   const { daysRemaining, isExpired: isTrialExpired } = calculateTrialStatus();
 
+  const userEmail = (user?.email || profile?.email || "").toLowerCase().trim();
+  const isAdmin = userEmail === "nickinicolas380@gmail.com" || profile?.role === "admin" || profile?.role === "ceo" || profile?.plan === "admin";
+
   const isPaidSubscriber = isPremiumState || 
                            profile?.plan === "premium" || 
                            profile?.subscriptionPlan === "premium";
 
-  // Access is granted if user is a paid subscriber OR if their 7-day free trial is active
-  const isPremium = isPaidSubscriber || !isTrialExpired;
+  // Access is granted if user is Admin/CEO, a paid subscriber OR if their 7-day free trial is active
+  const isPremium = isAdmin || isPaidSubscriber || !isTrialExpired;
 
   const setIsPremium = (val: boolean) => {
     setIsPremiumState(val);
@@ -321,6 +324,14 @@ export default function App() {
     saveFood(updated);
     if (user) {
       await syncDocToFirestore("food", log.id, log);
+    }
+  };
+
+  const handleDeleteFoodLog = async (id: string) => {
+    const updated = foodLogs.filter((l) => l.id !== id);
+    saveFood(updated);
+    if (user) {
+      await deleteDocFromFirestore("food", id);
     }
   };
 
@@ -794,6 +805,7 @@ export default function App() {
             <AlimentacaoView
               logs={foodLogs}
               onAddLog={handleAddFoodLog}
+              onDeleteLog={handleDeleteFoodLog}
               profile={profile}
               isPremium={isPremium}
               onNavigateToSubscription={() => setCurrentView("subscription")}
@@ -820,6 +832,7 @@ export default function App() {
               onReceiveAssistantMessage={handleReceiveAssistantMessage}
               profile={profile}
               currentStats={currentStats}
+              recentMeals={foodLogs}
               isPremium={isPremium}
               onNavigateToSubscription={() => setCurrentView("subscription")}
             />

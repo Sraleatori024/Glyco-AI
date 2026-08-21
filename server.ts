@@ -42,7 +42,28 @@ interface ReservationResult {
 }
 
 // Helper to check and reserve AI slot atomically in Firestore on the server
-async function reserveAiSlot(uid: string | undefined, userProfile?: any): Promise<ReservationResult> {
+async function reserveAiSlot(uid: string | undefined, userProfile?: any, requestEmail?: string): Promise<ReservationResult> {
+  const userEmail = (
+    requestEmail ||
+    userProfile?.email ||
+    userProfile?.userEmail ||
+    (typeof userProfile === "string" && userProfile.includes("@") ? userProfile : "")
+  ).toLowerCase().trim();
+
+  // Check Admin / CEO privileges
+  const isAdminOrCeo = 
+    userEmail === "nickinicolas380@gmail.com" ||
+    userProfile?.role === "admin" ||
+    userProfile?.role === "ceo" ||
+    userProfile?.plan === "admin" ||
+    userProfile?.plan === "ceo";
+
+  if (isAdminOrCeo) {
+    console.log(`[ETAPA 3: AUTH] Usuário ${userEmail || uid || "N/A"} reconhecido como ADMIN/CEO.`);
+    console.log(`[ETAPA 4: QUOTA] Acesso ilimitado concedido (ADMIN/CEO - Isento de cotas de teste).`);
+    return { allowed: true, isDevMode: false, isPremium: true, currentUsage: 0, uid, reserved: false, reason: "ADMIN_CEO_UNLIMITED" };
+  }
+
   // 1. Check server-side DEVELOPMENT_MODE flag
   const isDevMode = 
     process.env.DEVELOPMENT_MODE === "true" ||
@@ -50,17 +71,20 @@ async function reserveAiSlot(uid: string | undefined, userProfile?: any): Promis
     process.env.DISABLE_AI_LIMITS === "true";
 
   if (isDevMode) {
-    console.log("[SERVER AI LIMIT]: DEVELOPMENT_MODE ativo no servidor. Acesso ilimitado à IA liberado.");
-    return { allowed: true, isDevMode: true, isPremium: false, currentUsage: 0, reserved: false };
+    console.log("[ETAPA 4: QUOTA] DEVELOPMENT_MODE ativo no servidor. Acesso ilimitado liberado.");
+    return { allowed: true, isDevMode: true, isPremium: false, currentUsage: 0, reserved: false, reason: "DEV_MODE_UNLIMITED" };
   }
 
   const userId = uid || userProfile?.uid;
   const isPayloadPremium = userProfile?.plan === "premium" || userProfile?.subscriptionStatus === "active";
 
+  if (isPayloadPremium) {
+    console.log(`[ETAPA 4: QUOTA] Usuário ${userId || userEmail || "N/A"} possui plano Premium ativo. Acesso liberado.`);
+    return { allowed: true, isDevMode: false, isPremium: true, currentUsage: 0, uid: userId, reserved: false, reason: "PREMIUM_UNLIMITED" };
+  }
+
   if (!userId) {
-    if (isPayloadPremium) {
-      return { allowed: true, isDevMode: false, isPremium: true, currentUsage: 0, reserved: false };
-    }
+    console.warn(`[ETAPA 3: AUTH & 4: QUOTA] Falha na identificação: UID e Email ausentes na requisição.`);
     return {
       allowed: false,
       isDevMode: false,
@@ -72,11 +96,13 @@ async function reserveAiSlot(uid: string | undefined, userProfile?: any): Promis
   }
 
   if (!serverDb) {
-    // If Firestore server instance is unavailable, fallback safely
+    // If Firestore server instance is unavailable, fallback safely to local profile state
     const usage = typeof userProfile?.aiUsageCount === "number" ? userProfile.aiUsageCount : 0;
-    if (isPayloadPremium || usage < 2) {
-      return { allowed: true, isDevMode: false, isPremium: isPayloadPremium, currentUsage: usage, uid: userId, reserved: false };
+    if (usage < 2) {
+      console.log(`[ETAPA 4: QUOTA] Usuário Free (Firestore offline fallback): Uso atual ${usage}/2. Liberado.`);
+      return { allowed: true, isDevMode: false, isPremium: false, currentUsage: usage, uid: userId, reserved: false };
     }
+    console.warn(`[ETAPA 4: QUOTA] Usuário Free (Firestore offline fallback): Cota de 2 análises excedida (${usage}/2). Bloqueado.`);
     return { allowed: false, isDevMode: false, isPremium: false, currentUsage: usage, reason: "TRIAL_EXHAUSTED", reserved: false };
   }
 
@@ -88,8 +114,10 @@ async function reserveAiSlot(uid: string | undefined, userProfile?: any): Promis
       const snap = await transaction.get(userRef);
       if (!snap.exists()) {
         // User doc doesn't exist yet, create with 1 reserved usage
+        console.log(`[ETAPA 4: QUOTA & 7: FIRESTORE] Criando documento inicial para usuário ${userId} com 1 uso reservado.`);
         transaction.set(userRef, {
           aiUsageCount: 1,
+          email: userEmail || null,
           plan: userProfile?.plan || "free",
           subscriptionStatus: userProfile?.subscriptionStatus || "inactive",
           updatedAt: new Date().toISOString()
@@ -98,19 +126,28 @@ async function reserveAiSlot(uid: string | undefined, userProfile?: any): Promis
       }
 
       const data = snap.data();
+      const docEmail = (data.email || "").toLowerCase().trim();
+      if (docEmail === "nickinicolas380@gmail.com" || data.role === "admin" || data.role === "ceo") {
+        console.log(`[ETAPA 3: AUTH & 4: QUOTA] Usuário ${userId} (${docEmail}) validado no Firestore como ADMIN/CEO.`);
+        return { allowed: true, isDevMode: false, isPremium: true, currentUsage: 0, uid: userId, reserved: false, reason: "ADMIN_CEO_UNLIMITED" };
+      }
+
       const isDbPremium = data.plan === "premium" || data.subscriptionStatus === "active";
       const currentUsage = typeof data.aiUsageCount === "number" ? data.aiUsageCount : 0;
 
       if (isDbPremium) {
-        return { allowed: true, isDevMode: false, isPremium: true, currentUsage, uid: userId, reserved: false };
+        console.log(`[ETAPA 4: QUOTA] Usuário ${userId} confirmado como Premium no Firestore.`);
+        return { allowed: true, isDevMode: false, isPremium: true, currentUsage, uid: userId, reserved: false, reason: "PREMIUM_UNLIMITED" };
       }
 
       if (currentUsage >= 2) {
+        console.warn(`[ETAPA 4: QUOTA] Usuário Free ${userId} atingiu o limite máximo de 2 usos gratuitos (Uso: ${currentUsage}/2).`);
         return { allowed: false, isDevMode: false, isPremium: false, currentUsage, reason: "TRIAL_EXHAUSTED", uid: userId, reserved: false };
       }
 
       // Safe to reserve slot! Increment count atomically in transaction
       const newUsage = currentUsage + 1;
+      console.log(`[ETAPA 4: QUOTA] Reservando slot de IA para usuário ${userId}: ${currentUsage} -> ${newUsage}/2.`);
       transaction.update(userRef, {
         aiUsageCount: newUsage,
         updatedAt: new Date().toISOString()
@@ -121,8 +158,8 @@ async function reserveAiSlot(uid: string | undefined, userProfile?: any): Promis
   } catch (err) {
     console.error("[SERVER AI LIMIT TRANSACTION ERROR]:", err);
     const usage = typeof userProfile?.aiUsageCount === "number" ? userProfile.aiUsageCount : 0;
-    if (isPayloadPremium || usage < 2) {
-      return { allowed: true, isDevMode: false, isPremium: isPayloadPremium, currentUsage: usage, uid: userId, reserved: false };
+    if (usage < 2) {
+      return { allowed: true, isDevMode: false, isPremium: false, currentUsage: usage, uid: userId, reserved: false };
     }
     return { allowed: false, isDevMode: false, isPremium: false, currentUsage: usage, reason: "TRIAL_EXHAUSTED", reserved: false };
   }
@@ -416,7 +453,7 @@ apiRouter.post(["/gemini/chat", "/chat", "/copilot", "/api/gemini/chat", "/api/c
 
   try {
     const customApiKey = req.headers["x-gemini-api-key"] || req.body?.apiKey;
-    const { messages, profile, currentStats } = req.body || {};
+    const { messages, profile, currentStats, recentMeals } = req.body || {};
     const uid = req.headers["x-user-uid"] || req.body?.uid || profile?.uid;
     targetUid = uid;
 
@@ -442,11 +479,15 @@ apiRouter.post(["/gemini/chat", "/chat", "/copilot", "/api/gemini/chat", "/api/c
     const systemInstruction = `Você é o Assistente Virtual da Glyco AI, um companheiro inteligente de suporte para diabetes.
 Use as seguintes regras cruciais de comportamento:
 1. Responda de forma extremamente empática, objetiva, moderna e acolhedora em português (Brasil).
-2. Leve em consideração o perfil clínico do paciente fornecido e suas estatísticas recentes.
-3. Se o paciente perguntar sobre alimentação (ex: "Posso comer pizza?"), forneça conselhos práticos e nutricionais inteligentes, explicando sobre moderação, contagem de carboidratos, ordem dos alimentos (comer fibras/proteínas antes) e o impacto esperado, sem proibicionismo punitivo.
+2. Leve em consideração o perfil clínico do paciente fornecido, suas estatísticas e as refeições recentes.
+3. Se o paciente perguntar sobre alimentação (ex: "Posso comer pizza?", ou "O que achei do meu almoço?"), forneça conselhos práticos e nutricionais inteligentes, explicando sobre moderação, contagem de carboidratos, ordem dos alimentos (comer fibras/proteínas antes) e o impacto esperado, sem proibicionismo punitivo.
 4. Se o usuário estiver relatando sintomas de hipoglicemia (tontura, suor frio, tremores), oriente IMEDIATAMENTE a regra dos 15g de carboidratos rápidos (ex: 150ml de refrigerante comum ou suco de laranja) e medir novamente em 15 minutos.
 5. Sempre exiba um pequeno lembrete humilde de que suas respostas são informativas e não substituem o médico do paciente.
 6. EVITE repetição de frases, mensagens prontas ou respostas genéricas. Cada interação deve ser totalmente dinâmica e adaptada especificamente ao conteúdo e tom da pergunta atual.`;
+
+    const mealsContextStr = Array.isArray(recentMeals) && recentMeals.length > 0
+      ? recentMeals.slice(0, 4).map((m: any) => `- ${m.nutrition?.foodName || m.description || "Refeição"}: ${m.nutrition?.carbohydrates || 0}g carbos, Carga Glicêmica: ${m.nutrition?.glycemicLoad || "N/A"}`).join('\n')
+      : "Nenhuma refeição registrada hoje.";
 
     const contextData = `
 --- CONTEXTO DO PACIENTE ---
@@ -456,6 +497,9 @@ Insulina: ${profile?.usesInsulin ? "Sim" : "Não"}
 Medicamentos: ${JSON.stringify(profile?.medications || [])}
 Média recente de glicemia: ${currentStats?.averageGlucose || "135"} mg/dL
 Tempo no alvo: ${currentStats?.timeInRange || "75"}%
+Metas glicêmicas: Jejum ${profile?.targetGlucoseMinJejum || 70}-${profile?.targetGlucoseMaxJejum || 130} mg/dL | Pós-prandial até ${profile?.targetGlucoseMaxPosPrandial || 180} mg/dL
+Refeições recentes do diário:
+${mealsContextStr}
 `;
 
     const fullInstruction = `${systemInstruction}\n\n${contextData}`;
@@ -616,62 +660,97 @@ apiRouter.post(["/gemini/analyze-food", "/analyze-food", "/analyze-food-photo", 
   let reservedSlot = false;
   let targetUid: string | undefined = undefined;
 
-  console.log(`\n--- [INÍCIO /api/gemini/analyze-food] ---`);
+  console.log(`\n===========================================================`);
+  console.log(`[ETAPA 2: API] Requisição recebida em /api/gemini/analyze-food`);
   console.log(`[CLIENTE]: ${req.headers["user-agent"] || "mobile"}`);
+  console.log(`===========================================================`);
 
   try {
     const customApiKey = req.headers["x-gemini-api-key"] || req.body?.apiKey;
     const { foodDescription: desc, base64Image, profile } = req.body || {};
     foodDescription = desc || "";
+    
+    // ETAPA 3: Autenticação
     const uid = req.headers["x-user-uid"] || req.body?.uid || profile?.uid;
+    const userEmail = (
+      req.headers["x-user-email"] ||
+      profile?.email ||
+      req.body?.email ||
+      ""
+    ).toLowerCase().trim();
     targetUid = uid;
 
+    console.log(`[ETAPA 3: AUTH] Verificando identificação do usuário...`);
+    console.log(`[ETAPA 3: AUTH] UID: "${uid || 'N/A'}" | Email: "${userEmail || 'N/A'}" | Role: "${profile?.role || 'N/A'}"`);
+
     if (!foodDescription && !base64Image) {
+      console.warn(`[ETAPA 2: API] [ERRO] Dados de entrada ausentes (sem texto e sem foto).`);
       return res.status(400).json({
-        error: "Dados de Entrada Ausentes",
-        message: "Forneça uma descrição do alimento ou tire/selecione uma foto da refeição.",
+        step: "2. API",
+        error: "DADOS_ENTRADA_AUSENTES",
+        statusCode: 400,
+        message: "Nenhuma descrição em texto ou foto de refeição foi fornecida na requisição.",
+        originalError: "Missing foodDescription and base64Image in request body",
+        probableCause: "O formulário foi enviado em branco sem arquivo anexado e sem texto digitado.",
         source: "Validação de Entrada (Servidor)",
-        statusCode: 400
+        timestamp: new Date().toISOString()
       });
     }
 
-    // 1. Server-Side AI Quota Verification & Atomic Reservation
-    const limitCheck = await reserveAiSlot(uid, profile);
+    // ETAPA 4: Quota
+    console.log(`[ETAPA 4: QUOTA] Consultando permissão de cota no servidor/Firestore...`);
+    const limitCheck = await reserveAiSlot(uid, profile, userEmail);
     if (!limitCheck.allowed) {
-      console.warn(`[AI LIMIT BLOCKED /analyze-food]: Usuário ${uid || "desconhecido"} bloqueado no servidor. Limite atingido.`);
+      console.warn(`[ERRO QUOTA] 403 - Limite de 2 análises gratuitas excedido para o usuário ${userEmail || uid || "desconhecido"}.`);
       return res.status(403).json({
+        step: "4. Quota",
         error: "TRIAL_EXHAUSTED",
         code: "TRIAL_EXHAUSTED",
-        message: "Sua conta atingiu o limite de 2 utilizações gratuitas da Inteligência Artificial. Assine o plano Premium para acesso ilimitado.",
+        statusCode: 403,
+        message: "Sua conta atingiu o limite de 2 utilizações gratuitas da Inteligência Artificial. Assine o plano Premium para ter análises ilimitadas.",
+        originalError: limitCheck.reason || "TRIAL_EXHAUSTED",
+        probableCause: "O usuário está no plano Free e já consumiu as 2 análises de demonstração.",
+        source: "Controle de Quota do Servidor (reserveAiSlot)",
         aiUsageCount: limitCheck.currentUsage,
-        statusCode: 403
+        timestamp: new Date().toISOString()
       });
     }
 
     reservedSlot = limitCheck.reserved;
+    console.log(`[ETAPA 4: QUOTA] Cota validada com sucesso. Motivo: ${limitCheck.reason || 'Liberado'}`);
 
-    const apiKey = process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY;
+    // ETAPA 5: Gemini API Key Resolution
+    const apiKey = customApiKey || process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY;
     if (!apiKey) {
-      console.error("[ERRO VERCEL]: GEMINI_API_KEY não encontrada nas variáveis de ambiente!");
+      console.error(`[ERRO GEMINI] 500 - GEMINI_API_KEY não configurada no ambiente.`);
       if (reservedSlot && targetUid) await rollbackAiSlot(targetUid);
       return res.status(500).json({
-        error: "Chave do Gemini Não Configurada",
-        message: "A chave de API GEMINI_API_KEY não foi configurada nas variáveis de ambiente do Vercel.",
-        source: "Painel da Vercel (Project Settings > Environment Variables)",
-        statusCode: 500
+        step: "5. Gemini",
+        error: "GEMINI_API_KEY_NAO_CONFIGURADA",
+        statusCode: 500,
+        message: "A chave de API GEMINI_API_KEY não foi encontrada nas variáveis de ambiente do servidor.",
+        originalError: "Environment variable GEMINI_API_KEY is undefined or empty",
+        probableCause: "A variável de ambiente GEMINI_API_KEY não foi adicionada no painel de produção (Project Settings > Environment Variables no Vercel ou Cloud Run).",
+        source: "Servidor Backend / Variáveis de Ambiente",
+        timestamp: new Date().toISOString()
       });
     }
 
-    const systemPrompt = `Você é um nutricionista especialista em diabetes, contagem de carboidratos e IA nutricional multimodal.
+    console.log(`[ETAPA 5: GEMINI] Chave GEMINI_API_KEY localizada (${apiKey.substring(0, 6)}...${apiKey.substring(apiKey.length - 4)}). Preparando payload para modelo gemini-2.5-flash...`);
+
+    const systemPrompt = `Você é um nutricionista clínico especialista em diabetes, alimentação funcional, contagem de carboidratos e IA nutricional multimodal.
 Sua tarefa é analisar a imagem fornecida (ou a descrição em texto) e identificar visualmente TODOS os alimentos presentes no prato de forma exata e fiel à foto real recebida.
-Você deve estimar detalhadamente os valores nutricionais baseados na porção visível ou descrita.
+Você deve estimar detalhadamente os valores nutricionais baseados na porção visível ou descrita, decompor os itens individuais do prato e fornecer orientações de nutrição funcional prática.
 
 AVISO MÉDICO OBRIGATÓRIO: Sempre inclua na explicação que se trata de uma estimativa informativa e não laboratorial.`;
 
     const userProfileContext = `
---- DADOS DO PACIENTE ---
+--- DADOS CLÍNICOS DO PACIENTE ---
 Tipo de Diabetes: ${profile?.diabetesType || "Tipo 2"}
-Usa Insulina? ${profile?.usesInsulin ? "Sim" : "Não"}
+Usa Insulina: ${profile?.usesInsulin ? "Sim" : "Não"}
+Medicamentos: ${JSON.stringify(profile?.medications || [])}
+Meta Glicêmica Pós-Prandial: até ${profile?.targetGlucoseMaxPosPrandial || 180} mg/dL
+Idade / Peso: ${profile?.age || "N/A"} anos / ${profile?.weight || "N/A"} kg
 `;
 
     const systemInstruction = `${systemPrompt}\n\n${userProfileContext}`;
@@ -685,16 +764,21 @@ Usa Insulina? ${profile?.usesInsulin ? "Sim" : "Não"}
       const cleanBase64 = parts[1];
 
       if (!cleanBase64 || cleanBase64.length < 50) {
+        console.error(`[ERRO FRONTEND/API] 400 - Formato Base64 corrompido.`);
         if (reservedSlot && targetUid) await rollbackAiSlot(targetUid);
         return res.status(400).json({
-          error: "Formato de Imagem Inválido",
-          message: "A foto enviada possui formato Base64 corrompido ou incompleto.",
-          source: "Processamento de Imagem (Servidor)",
-          statusCode: 400
+          step: "1. Frontend",
+          error: "FOTO_CORROMPIDA",
+          statusCode: 400,
+          message: "A foto enviada possui formato Base64 incompleto ou corrompido durante o envio.",
+          originalError: "Invalid or empty cleanBase64 payload",
+          probableCause: "Falha durante o processo de compressão no navegador ou upload interrompido.",
+          source: "Processamento de Imagem (Frontend/API)",
+          timestamp: new Date().toISOString()
         });
       }
 
-      console.log(`[DADOS DA FOTO]: MimeType: "${mimeType}", Tamanho Base64: ${cleanBase64.length} caracteres.`);
+      console.log(`[ETAPA 5: GEMINI] Foto Base64 processada: MimeType: "${mimeType}", Tamanho: ${Math.round(cleanBase64.length / 1024)} KB.`);
 
       partsList.push({
         inlineData: {
@@ -709,12 +793,10 @@ Você deve analisar VISUALMENTE esta foto e identificar todos os alimentos indiv
 
 Sua resposta DEVE ser extremamente fiel ao que está de fato na foto. Não use respostas genéricas.
 
-No campo 'explanation', você DEVE iniciar obrigatoriamente informando o que identificou na imagem, no seguinte formato:
-"Na imagem identifiquei:
-- [alimento 1]
-- [alimento 2]
-..."
-Depois disso, forneça uma análise nutricional completa contendo orientações práticas focadas em diabetes.
+No campo 'explanation', forneça uma análise acolhedora e prática focada em diabetes.
+Preencha a lista 'identifiedItems' com cada alimento individual decomposto no prato.
+Preencha 'functionalTips' com 2 a 3 dicas práticas de nutrição funcional (ex: substituições inteligentes, adição de fibras ou gorduras boas para diminuir o pico glicêmico).
+Preencha 'consumptionOrder' com a sequência fisiologicamente ideal de ingestão (ex: "1º Fibras/Salada -> 2º Proteínas -> 3º Carboidratos").
 
 Preencha os campos estruturados de forma realista para o prato e sua porção visível:
 - 'foodName': O nome específico e real do prato identificado.
@@ -728,22 +810,20 @@ Preencha os campos estruturados de forma realista para o prato e sua porção vi
         promptText += `\nDescrição adicional do usuário: "${foodDescription}"`;
       }
     } else {
-      console.log(`[DADOS DE TEXTO]: Descrição recebida: "${foodDescription}"`);
+      console.log(`[ETAPA 5: GEMINI] Descrição em texto: "${foodDescription}"`);
 
       promptText = `
 Analise a seguinte descrição de refeição:
 "${foodDescription}"
 
-No campo 'explanation', você DEVE iniciar obrigatoriamente no seguinte formato:
-"Na refeição descrita identifiquei:
-- [alimento 1]
-- [alimento 2]
-..."
-Depois, forneça as estimativas nutricionais realistas e o impacto esperado para o diabetes do paciente.
+No campo 'explanation', forneça uma análise nutricional clara e acolhedora.
+Decomponha os alimentos em 'identifiedItems', inclua dicas de nutrição funcional em 'functionalTips' e a ordem de consumo ideal em 'consumptionOrder'.
 `;
     }
 
     partsList.push({ text: promptText });
+
+    console.log(`[ETAPA 5: GEMINI] Disparando requisição para a API do Gemini...`);
 
     const response = await generateContentWithRetry({
       apiKey: customApiKey,
@@ -765,7 +845,29 @@ Depois, forneça as estimativas nutricionais realistas e o impacto esperado para
             glycemicLoad: { type: Type.NUMBER, description: "Carga Glicêmica estimada da porção." },
             glycemicIndexRating: { type: Type.STRING, description: "Classificação do índice glicêmico: 'baixo', 'medio' ou 'alto'." },
             expectedImpact: { type: Type.STRING, description: "Impacto esperado na glicemia ('Baixo', 'Moderado', 'Alto')." },
-            explanation: { type: Type.STRING, description: "Explicação detalhada dos alimentos e conselhos nutricionais." }
+            explanation: { type: Type.STRING, description: "Explicação detalhada dos alimentos e conselhos nutricionais." },
+            consumptionOrder: { type: Type.STRING, description: "Ordem recomendada de ingestão dos alimentos no prato." },
+            functionalTips: {
+              type: Type.ARRAY,
+              items: { type: Type.STRING },
+              description: "Lista de 2 a 3 dicas práticas de nutrição funcional e substituições saudáveis."
+            },
+            identifiedItems: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  name: { type: Type.STRING, description: "Nome do alimento individual identificado." },
+                  portion: { type: Type.STRING, description: "Estimativa da porção deste item." },
+                  carbohydrates: { type: Type.NUMBER, description: "Carboidratos deste item em gramas." },
+                  protein: { type: Type.NUMBER, description: "Proteína deste item em gramas." },
+                  fats: { type: Type.NUMBER, description: "Gordura deste item em gramas." },
+                  glycemicImpact: { type: Type.STRING, description: "Impacto glicêmico do item: 'baixo', 'medio' ou 'alto'." }
+                },
+                required: ["name", "portion", "carbohydrates", "glycemicImpact"]
+              },
+              description: "Lista de alimentos individuais identificados no prato."
+            }
           },
           required: [
             "foodName",
@@ -787,7 +889,26 @@ Depois, forneça as estimativas nutricionais realistas e o impacto esperado para
 
     const duration = Date.now() - startTime;
     const resultText = response.text || "{}";
-    const parsedResult = JSON.parse(resultText);
+
+    // ETAPA 6: Resposta
+    console.log(`[ETAPA 6: RESPOSTA] Processando resposta JSON do Gemini (${duration}ms)...`);
+    let parsedResult: any = {};
+    try {
+      parsedResult = JSON.parse(resultText);
+    } catch (parseErr) {
+      console.error(`[ERRO RESPOSTA] 502 - Resposta do Gemini não é um JSON válido:`, resultText);
+      if (reservedSlot && targetUid) await rollbackAiSlot(targetUid);
+      return res.status(502).json({
+        step: "6. Resposta",
+        error: "RESPOSTA_JSON_INVALIDA",
+        statusCode: 502,
+        message: "O modelo retornou uma estrutura de texto corrompida que não pôde ser interpretada como JSON.",
+        originalError: String(parseErr),
+        probableCause: "Incompatibilidade no formato retornado pelo modelo de IA.",
+        source: "Parser de Resposta do Servidor",
+        timestamp: new Date().toISOString()
+      });
+    }
 
     const fnLower = (parsedResult.foodName || "").toLowerCase();
     const expLower = (parsedResult.explanation || "").toLowerCase();
@@ -800,55 +921,90 @@ Depois, forneça as estimativas nutricionais realistas e o impacto esperado para
       (parsedResult.carbohydrates === 0 && parsedResult.protein === 0 && parsedResult.fats === 0 && (expLower.includes("nenhum alimento") || expLower.includes("sem alimentos")));
 
     if (isUnrecognized && base64Image) {
-      console.warn(`[RECONHECIMENTO INCOMPLETO]: Nenhum alimento identificado na imagem.`);
+      console.warn(`[ERRO RESPOSTA] 422 - Nenhum alimento identificado na imagem.`);
       if (reservedSlot && targetUid) {
         await rollbackAiSlot(targetUid);
       }
       return res.status(422).json({
-        error: "Foto Não Reconhecida",
-        message: "A Inteligência Artificial não conseguiu identificar nenhum alimento visível nesta foto. Por favor, envie uma foto bem iluminada e focada no prato de comida.",
-        source: "Inteligência Artificial (Gemini)",
+        step: "6. Resposta",
+        error: "FOTO_NAO_RECONHECIDA",
         statusCode: 422,
-        details: parsedResult.explanation
+        message: "A Inteligência Artificial não conseguiu identificar nenhum alimento visível nesta foto. Por favor, envie uma foto bem iluminada e focada no prato de comida.",
+        originalError: "No recognizable food items identified in input image",
+        probableCause: "A foto está muito escura, sem foco ou não contém prato/comida visível.",
+        source: "Inteligência Artificial (Gemini)",
+        details: parsedResult.explanation,
+        timestamp: new Date().toISOString()
       });
     }
 
-    console.log(`[FIM SUCESSO analyze-food]: Concluído em ${duration}ms`);
+    console.log(`[ETAPA 6: RESPOSTA] [SUCESSO] Alimento identificado: "${parsedResult.foodName}" (${parsedResult.carbohydrates}g carboidratos, ${parsedResult.calories} kcal). Concluído em ${duration}ms.`);
+
     res.json({
+      step: "6. Resposta",
+      status: "success",
       ...parsedResult,
-      aiUsageCount: limitCheck.currentUsage
+      aiUsageCount: limitCheck.currentUsage,
+      elapsedTimeMs: duration
     });
   } catch (error: any) {
     const elapsedTime = Date.now() - startTime;
     const errMsg = String(error.message || error);
 
-    let source = "Servidor Backend";
+    let step = "5. Gemini";
+    let errorName = "FALHA_GEMINI_API";
     let statusCode = error.status || error.statusCode || 500;
+    let probableCause = "Ocorreu uma falha ao comunicar com os servidores do Google Gemini.";
+    let source = "Servidor / API Gemini";
 
     if (errMsg.includes("413") || errMsg.includes("Payload Too Large") || error.type === "entity.too.large") {
-      source = "Servidor (Tamanho da Imagem Excede o Limite do Vercel Serverless)";
+      step = "2. API";
+      errorName = "PAYLOAD_TOO_LARGE";
+      source = "Servidor (Tamanho da Imagem Excede Limite do Vercel/Node)";
       statusCode = 413;
-    } else if (errMsg.includes("503") || errMsg.includes("UNAVAILABLE") || errMsg.includes("429") || errMsg.includes("Quota")) {
-      source = "API do Gemini (Limite de Requisições / Serviço Temporariamente Indisponível)";
+      probableCause = "A imagem enviada excedeu o limite máximo de payload do servidor.";
+    } else if (errMsg.includes("503") || errMsg.includes("UNAVAILABLE")) {
+      step = "5. Gemini";
+      errorName = "GEMINI_SERVICE_UNAVAILABLE";
+      source = "API do Gemini (Serviço Temporariamente Indisponível)";
       statusCode = 503;
-    } else if (errMsg.includes("API key") || errMsg.includes("API_KEY") || errMsg.includes("403")) {
-      source = "API do Gemini (Chave de API GEMINI_API_KEY Inválida ou Não Configurada)";
+      probableCause = "Os servidores do Google Gemini estão sob alta demanda temporária. Tente novamente em alguns segundos.";
+    } else if (errMsg.includes("429") || errMsg.includes("Quota") || errMsg.includes("RESOURCE_EXHAUSTED")) {
+      step = "5. Gemini";
+      errorName = "GEMINI_RATE_LIMIT";
+      source = "API do Gemini (Limite de Quota por Minuto Excedido)";
+      statusCode = 429;
+      probableCause = "A cota por minuto da chave GEMINI_API_KEY foi atingida no Google Cloud/AI Studio.";
+    } else if (errMsg.includes("API key") || errMsg.includes("API_KEY") || errMsg.includes("403") || errMsg.includes("PERMISSION_DENIED")) {
+      step = "5. Gemini";
+      errorName = "GEMINI_API_KEY_INVALIDA";
+      source = "API do Gemini (Chave GEMINI_API_KEY Inválida ou Sem Permissão)";
       statusCode = 403;
+      probableCause = "A chave GEMINI_API_KEY configurada no servidor é inválida, foi revogada ou não possui acesso ao modelo gemini-2.5-flash.";
     }
 
-    console.error(`[ERRO CRÍTICO analyze-food]: ${errMsg} (Status: ${statusCode}, Tempo: ${elapsedTime}ms)`);
+    console.error(`\n[ERRO NA ETAPA ${step}]`);
+    console.error(`• NOME DO ERRO: ${errorName}`);
+    console.error(`• CÓDIGO HTTP: ${statusCode}`);
+    console.error(`• MENSAGEM ORIGINAL: ${errMsg}`);
+    console.error(`• CAUSA PROVÁVEL: ${probableCause}`);
+    console.error(`• TEMPO: ${elapsedTime}ms\n`);
 
     if (reservedSlot && targetUid) {
       await rollbackAiSlot(targetUid);
     }
 
     res.status(statusCode).json({
-      error: "Falha na Análise da Foto / Refeição",
-      message: errMsg,
-      source: source,
+      step: step,
+      error: errorName,
       statusCode: statusCode,
+      message: errMsg,
+      originalError: errMsg,
+      probableCause: probableCause,
+      source: source,
       elapsedTimeMs: elapsedTime,
-      details: error.stack || String(error)
+      details: error.stack || String(error),
+      timestamp: new Date().toISOString()
     });
   }
 });

@@ -34,6 +34,15 @@ export interface GlucoseLog {
   notes?: string;
 }
 
+export interface IdentifiedFoodItem {
+  name: string;
+  portion: string;
+  carbohydrates: number;
+  protein?: number;
+  fats?: number;
+  glycemicImpact: "baixo" | "medio" | "alto";
+}
+
 export interface FoodNutrition {
   foodName: string;
   portionSize: string;
@@ -47,6 +56,9 @@ export interface FoodNutrition {
   glycemicIndexRating: "baixo" | "medio" | "alto";
   expectedImpact: string; // e.g., 'Baixo', 'Moderado', 'Rápido', 'Muito Alto'
   explanation: string;
+  identifiedItems?: IdentifiedFoodItem[];
+  functionalTips?: string[];
+  consumptionOrder?: string;
 }
 
 export interface FoodLog {
@@ -55,6 +67,7 @@ export interface FoodLog {
   description: string;
   base64Image?: string;
   nutrition?: FoodNutrition;
+  isManual?: boolean;
 }
 
 export interface MedicationLog {

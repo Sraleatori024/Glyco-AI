@@ -13,6 +13,10 @@ import {
   Message,
   INITIAL_CHAT_MESSAGES
 } from "./types";
+import {
+  startMedicationScheduler,
+  registerNotificationServiceWorker,
+} from "./services/notificationService";
 import OnboardingView from "./components/OnboardingView";
 import DashboardView from "./components/DashboardView";
 import GlicemiaView from "./components/GlicemiaView";
@@ -251,6 +255,58 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
+  // Notifications State & Alarm Scheduler
+  const [notificationsActive, setNotificationsActive] = useState<boolean>(() => {
+    return localStorage.getItem("glyco_notifications_active") !== "false";
+  });
+
+  const [activeAlarmToast, setActiveAlarmToast] = useState<{
+    type: "med" | "insulin";
+    name: string;
+    dose: string | number;
+    time: string;
+  } | null>(null);
+
+  const handleToggleNotificationsActive = (active: boolean) => {
+    setNotificationsActive(active);
+    localStorage.setItem("glyco_notifications_active", String(active));
+  };
+
+  // Register Service Worker and listen to notification clicks
+  useEffect(() => {
+    registerNotificationServiceWorker();
+
+    if (typeof window === "undefined" || !("serviceWorker" in navigator)) return;
+
+    const handleSWMessage = (event: MessageEvent) => {
+      if (event.data && event.data.type === "NAVIGATE_VIEW") {
+        setCurrentView(event.data.view || "medicamentos");
+      }
+    };
+
+    navigator.serviceWorker.addEventListener("message", handleSWMessage);
+    return () => {
+      navigator.serviceWorker.removeEventListener("message", handleSWMessage);
+    };
+  }, []);
+
+  // Start background medication and insulin alarm engine
+  useEffect(() => {
+    if (!user) return;
+
+    const cleanup = startMedicationScheduler({
+      userId: user.uid,
+      getMedications: () => medicationLogs,
+      getInsulinLogs: () => insulinLogs,
+      isEnabled: () => notificationsActive,
+      onNotificationTriggered: (item) => {
+        setActiveAlarmToast(item);
+      },
+    });
+
+    return () => cleanup();
+  }, [user, medicationLogs, insulinLogs, notificationsActive]);
+
   // Sync state helpers
   const saveProfile = async (p: UserProfile | null) => {
     setProfile(p);
@@ -367,6 +423,20 @@ export default function App() {
     }
   };
 
+  const handleEditMedicationLog = async (id: string, updatedFields: Partial<MedicationLog>) => {
+    const updated = medicationLogs.map((m) => {
+      if (m.id === id) {
+        return { ...m, ...updatedFields };
+      }
+      return m;
+    });
+    saveMeds(updated);
+    const target = updated.find((m) => m.id === id);
+    if (user && target) {
+      await syncDocToFirestore("meds", id, target);
+    }
+  };
+
   const handleDeleteMedicationLog = async (id: string) => {
     const updated = medicationLogs.filter((m) => m.id !== id);
     saveMeds(updated);
@@ -385,6 +455,20 @@ export default function App() {
     saveInsulin(updated);
     if (user) {
       await syncDocToFirestore("insulin", ins.id, ins);
+    }
+  };
+
+  const handleEditInsulinLog = async (id: string, updatedFields: Partial<InsulinLog>) => {
+    const updated = insulinLogs.map((i) => {
+      if (i.id === id) {
+        return { ...i, ...updatedFields };
+      }
+      return i;
+    });
+    saveInsulin(updated);
+    const target = updated.find((i) => i.id === id);
+    if (user && target) {
+      await syncDocToFirestore("insulin", id, target);
     }
   };
 
@@ -777,6 +861,42 @@ export default function App() {
             </div>
           )}
 
+          {/* Active Medication/Insulin Real-time Alert Toast Banner */}
+          {activeAlarmToast && (
+            <div className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white p-4 rounded-2xl shadow-lg flex items-center justify-between gap-4 animate-in slide-in-from-top-4 duration-300">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center text-white shrink-0">
+                  <Pill className="w-5 h-5 animate-bounce" />
+                </div>
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-wider text-blue-200">
+                    ⏰ Alarme de {activeAlarmToast.type === "med" ? "Medicamento" : "Insulina"} ({activeAlarmToast.time})
+                  </p>
+                  <p className="text-sm font-extrabold mt-0.5">
+                    {activeAlarmToast.name} — Dose: {activeAlarmToast.dose}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    setCurrentView("medicamentos");
+                    setActiveAlarmToast(null);
+                  }}
+                  className="px-3.5 py-1.5 bg-white text-blue-900 hover:bg-blue-50 rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer"
+                >
+                  Registrar Agora
+                </button>
+                <button
+                  onClick={() => setActiveAlarmToast(null)}
+                  className="p-1.5 text-blue-200 hover:text-white rounded-lg hover:bg-white/10 transition-all cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Active dynamic views routers */}
           {currentView === "dashboard" && (
             <DashboardView
@@ -816,12 +936,16 @@ export default function App() {
             <MedicamentosView
               logs={medicationLogs}
               onAddLog={handleAddMedicationLog}
+              onEditLog={handleEditMedicationLog}
               onToggleStatus={handleToggleMedicationStatus}
               onDeleteLog={handleDeleteMedicationLog}
               insulinLogs={insulinLogs}
               onAddInsulinLog={handleAddInsulinLog}
+              onEditInsulinLog={handleEditInsulinLog}
               onToggleInsulinStatus={handleToggleInsulinStatus}
               onDeleteInsulinLog={handleDeleteInsulinLog}
+              notificationsActive={notificationsActive}
+              onToggleNotificationsActive={handleToggleNotificationsActive}
             />
           )}
 

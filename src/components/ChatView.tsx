@@ -210,13 +210,15 @@ export default function ChatView({
 
         {/* Message bubble stream */}
         <div className="flex-1 overflow-y-auto p-6 space-y-4">
-          {messages.map((msg) => {
+          {(messages || []).map((msg) => {
+            if (!msg) return null;
             const isUser = msg.sender === "user";
-            const cleanMessageText = msg.text.replace(/\[EXERCISE:[a-zA-Z0-9_-]+\]/g, "").trim();
+            const textContent = typeof msg.text === "string" ? msg.text : String(msg.text || "");
+            const cleanMessageText = textContent.replace(/\[EXERCISE:[a-zA-Z0-9_-]+\]/g, "").trim();
 
             return (
               <div
-                key={msg.id}
+                key={msg.id || Math.random().toString(36).substr(2, 9)}
                 className={`flex gap-3 max-w-[85%] ${isUser ? "ml-auto flex-row-reverse" : "mr-auto"}`}
               >
                 <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 text-white ${isUser ? "bg-blue-600" : "bg-neutral-900"}`}>

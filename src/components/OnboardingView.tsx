@@ -27,13 +27,13 @@ export default function OnboardingView({ initialProfile, onComplete }: Onboardin
     height: initialProfile?.height || 175,
     weight: initialProfile?.weight || 75,
     diabetesType: initialProfile?.diabetesType || "tipo2",
-    medications: initialProfile?.medications || [],
-    usesInsulin: initialProfile?.usesInsulin || false,
-    insulinTypes: initialProfile?.insulinTypes || [],
+    medications: Array.isArray(initialProfile?.medications) ? initialProfile.medications : [],
+    usesInsulin: !!initialProfile?.usesInsulin,
+    insulinTypes: Array.isArray(initialProfile?.insulinTypes) ? initialProfile.insulinTypes : [],
     targetGlucoseMinJejum: initialProfile?.targetGlucoseMinJejum || 70,
     targetGlucoseMaxJejum: initialProfile?.targetGlucoseMaxJejum || 130,
     targetGlucoseMaxPosPrandial: initialProfile?.targetGlucoseMaxPosPrandial || 180,
-    goals: initialProfile?.goals || [],
+    goals: Array.isArray(initialProfile?.goals) ? initialProfile.goals : [],
   });
 
   const [currentMed, setCurrentMed] = useState("");
@@ -45,19 +45,19 @@ export default function OnboardingView({ initialProfile, onComplete }: Onboardin
     } else {
       // Complete onboarding
       const completeProfile: UserProfile = {
-        name: profile.name || "Paciente",
-        age: Number(profile.age) || 35,
+        name: (profile.name || "").trim() || "Paciente",
+        age: typeof profile.age === "number" && !isNaN(profile.age) ? profile.age : 35,
         gender: profile.gender || "Não informado",
-        height: Number(profile.height) || 170,
-        weight: Number(profile.weight) || 70,
+        height: typeof profile.height === "number" && !isNaN(profile.height) ? profile.height : 170,
+        weight: typeof profile.weight === "number" && !isNaN(profile.weight) ? profile.weight : 70,
         diabetesType: (profile.diabetesType as DiabetesType) || "tipo2",
-        medications: profile.medications || [],
+        medications: Array.isArray(profile.medications) ? profile.medications : [],
         usesInsulin: !!profile.usesInsulin,
-        insulinTypes: profile.insulinTypes || [],
-        targetGlucoseMinJejum: Number(profile.targetGlucoseMinJejum) || 70,
-        targetGlucoseMaxJejum: Number(profile.targetGlucoseMaxJejum) || 130,
-        targetGlucoseMaxPosPrandial: Number(profile.targetGlucoseMaxPosPrandial) || 180,
-        goals: profile.goals || [],
+        insulinTypes: Array.isArray(profile.insulinTypes) ? profile.insulinTypes : [],
+        targetGlucoseMinJejum: typeof profile.targetGlucoseMinJejum === "number" && !isNaN(profile.targetGlucoseMinJejum) ? profile.targetGlucoseMinJejum : 70,
+        targetGlucoseMaxJejum: typeof profile.targetGlucoseMaxJejum === "number" && !isNaN(profile.targetGlucoseMaxJejum) ? profile.targetGlucoseMaxJejum : 130,
+        targetGlucoseMaxPosPrandial: typeof profile.targetGlucoseMaxPosPrandial === "number" && !isNaN(profile.targetGlucoseMaxPosPrandial) ? profile.targetGlucoseMaxPosPrandial : 180,
+        goals: Array.isArray(profile.goals) ? profile.goals : [],
       };
       onComplete(completeProfile);
     }
@@ -192,7 +192,7 @@ export default function OnboardingView({ initialProfile, onComplete }: Onboardin
                       type="text"
                       className="w-full px-4 py-3 border border-neutral-200 rounded-xl bg-neutral-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
                       placeholder="Ex: João da Silva"
-                      value={profile.name}
+                      value={profile.name || ""}
                       onChange={(e) => setProfile({ ...profile, name: e.target.value })}
                     />
                   </div>
@@ -207,8 +207,11 @@ export default function OnboardingView({ initialProfile, onComplete }: Onboardin
                         type="number"
                         className="w-full px-4 py-3 border border-neutral-200 rounded-xl bg-neutral-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
                         placeholder="Anos"
-                        value={profile.age || ""}
-                        onChange={(e) => setProfile({ ...profile, age: e.target.value ? Number(e.target.value) : undefined })}
+                        value={profile.age ?? ""}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setProfile({ ...profile, age: val === "" ? undefined : Number(val) });
+                        }}
                       />
                     </div>
 
@@ -219,7 +222,7 @@ export default function OnboardingView({ initialProfile, onComplete }: Onboardin
                       <select
                         id="gender-select"
                         className="w-full px-4 py-3 border border-neutral-200 rounded-xl bg-neutral-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
-                        value={profile.gender}
+                        value={profile.gender || "Masculino"}
                         onChange={(e) => setProfile({ ...profile, gender: e.target.value })}
                       >
                         <option value="Masculino">Masculino</option>
@@ -260,8 +263,11 @@ export default function OnboardingView({ initialProfile, onComplete }: Onboardin
                       type="number"
                       className="w-full px-4 py-3 border border-neutral-200 rounded-xl bg-neutral-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
                       placeholder="Ex: 175"
-                      value={profile.height || ""}
-                      onChange={(e) => setProfile({ ...profile, height: Number(e.target.value) })}
+                      value={profile.height ?? ""}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setProfile({ ...profile, height: val === "" ? undefined : Number(val) });
+                      }}
                     />
                   </div>
 
@@ -275,18 +281,21 @@ export default function OnboardingView({ initialProfile, onComplete }: Onboardin
                       step="0.1"
                       className="w-full px-4 py-3 border border-neutral-200 rounded-xl bg-neutral-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
                       placeholder="Ex: 75.4"
-                      value={profile.weight || ""}
-                      onChange={(e) => setProfile({ ...profile, weight: Number(e.target.value) })}
+                      value={profile.weight ?? ""}
+                      onChange={(e) => {
+                        const val = e.target.value.replace(",", ".");
+                        setProfile({ ...profile, weight: val === "" ? undefined : Number(val) });
+                      }}
                     />
                   </div>
                 </div>
 
-                {profile.height && profile.weight && (
+                {Boolean(profile.height && profile.weight && !isNaN(Number(profile.height)) && !isNaN(Number(profile.weight)) && Number(profile.height) > 0 && Number(profile.weight) > 0) && (
                   <div className="bg-blue-50 p-4 rounded-2xl border border-blue-100 flex items-start gap-3">
                     <User className="w-5 h-5 text-blue-600 mt-0.5 shrink-0" />
                     <div>
                       <p className="text-sm font-semibold text-blue-900">
-                        Seu IMC Estimado: {((profile.weight) / Math.pow((profile.height || 1) / 100, 2)).toFixed(1)}
+                        Seu IMC Estimado: {(Number(profile.weight) / Math.pow(Number(profile.height) / 100, 2)).toFixed(1)}
                       </p>
                       <p className="text-xs text-blue-700 mt-0.5">
                         Este valor é utilizado pela nossa Inteligência Artificial para correlacionar sua sensibilidade à insulina com atividades físicas.
@@ -476,8 +485,11 @@ export default function OnboardingView({ initialProfile, onComplete }: Onboardin
                         <input
                           type="number"
                           className="w-full px-3 py-2 border border-neutral-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-1 focus:ring-blue-500"
-                          value={profile.targetGlucoseMinJejum || ""}
-                          onChange={(e) => setProfile({ ...profile, targetGlucoseMinJejum: Number(e.target.value) })}
+                          value={profile.targetGlucoseMinJejum ?? ""}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setProfile({ ...profile, targetGlucoseMinJejum: val === "" ? undefined : Number(val) });
+                          }}
                         />
                       </div>
                       <div>
@@ -487,8 +499,11 @@ export default function OnboardingView({ initialProfile, onComplete }: Onboardin
                         <input
                           type="number"
                           className="w-full px-3 py-2 border border-neutral-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-1 focus:ring-blue-500"
-                          value={profile.targetGlucoseMaxJejum || ""}
-                          onChange={(e) => setProfile({ ...profile, targetGlucoseMaxJejum: Number(e.target.value) })}
+                          value={profile.targetGlucoseMaxJejum ?? ""}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setProfile({ ...profile, targetGlucoseMaxJejum: val === "" ? undefined : Number(val) });
+                          }}
                         />
                       </div>
                       <div>
@@ -498,8 +513,11 @@ export default function OnboardingView({ initialProfile, onComplete }: Onboardin
                         <input
                           type="number"
                           className="w-full px-3 py-2 border border-neutral-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-1 focus:ring-blue-500"
-                          value={profile.targetGlucoseMaxPosPrandial || ""}
-                          onChange={(e) => setProfile({ ...profile, targetGlucoseMaxPosPrandial: Number(e.target.value) })}
+                          value={profile.targetGlucoseMaxPosPrandial ?? ""}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setProfile({ ...profile, targetGlucoseMaxPosPrandial: val === "" ? undefined : Number(val) });
+                          }}
                         />
                       </div>
                     </div>

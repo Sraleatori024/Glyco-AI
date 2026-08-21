@@ -7,8 +7,8 @@ interface ChatViewProps {
   messages: Message[];
   onSendMessage: (text: string) => void;
   onReceiveAssistantMessage: (text: string) => void;
-  profile: UserProfile;
-  currentStats: {
+  profile?: UserProfile | null;
+  currentStats?: {
     averageGlucose: number;
     timeInRange: number;
   };
@@ -162,7 +162,7 @@ export default function ChatView({
           <span className="text-xxs font-bold text-blue-600 uppercase tracking-widest block">Menu Copiloto</span>
           <h3 className="text-base font-bold text-neutral-900 mt-1">Sua IA Clínica</h3>
           <p className="text-xs text-neutral-500 mt-1 leading-relaxed">
-            Nossa Inteligência Artificial analisa suas informações clínicas (Diabetes {profile.diabetesType === "tipo2" ? "Tipo 2" : "Tipo 1"}) e medicamentos atuais para dar respostas mais completas.
+            Nossa Inteligência Artificial analisa suas informações clínicas (Diabetes {profile?.diabetesType === "tipo1" ? "Tipo 1" : "Tipo 2"}) e medicamentos atuais para dar respostas mais completas.
           </p>
         </div>
 

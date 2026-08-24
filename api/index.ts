@@ -237,12 +237,12 @@ async function generateContentWithRetry(params: {
   apiKey?: string;
 }) {
   const ai = getGeminiClient(params.apiKey);
-  const modelsToTry = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-flash-latest", "gemini-1.5-pro"];
+  const modelsToTry = ["gemini-2.5-flash", "gemini-flash-latest", "gemini-2.5-pro"];
   let lastError: any = null;
 
   for (const modelName of modelsToTry) {
-    let delay = 1000;
-    for (let attempt = 1; attempt <= 3; attempt++) {
+    let delay = 500;
+    for (let attempt = 1; attempt <= 2; attempt++) {
       try {
         console.log(`[AI REQUEST] Modelo: ${modelName} | Tentativa ${attempt}`);
         const response = await ai.models.generateContent({
@@ -264,9 +264,10 @@ async function generateContentWithRetry(params: {
           err.status === "RESOURCE_EXHAUSTED" || 
           err.statusCode === 429 ||
           errMsg.includes("429") ||
-          errMsg.includes("LIMIT");
+          errMsg.includes("LIMIT") ||
+          errMsg.includes("RATE");
 
-        if (isTransient && attempt < 3) {
+        if (isTransient && attempt < 2) {
           console.log(`[AI RETRY] Aguardando ${delay}ms...`);
           await new Promise((resolve) => setTimeout(resolve, delay));
           delay *= 2;
@@ -277,7 +278,7 @@ async function generateContentWithRetry(params: {
     }
   }
 
-  throw lastError || new Error("Falha ao gerar conteúdo com a API do Gemini após tentar múltiplos modelos.");
+  throw lastError || new Error("Falha ao gerar conteúdo com a API do Gemini após tentar modelos suportados.");
 }
 
 // Create Express Router to handle API routes consistently in both Vercel and standalone Node
@@ -822,7 +823,7 @@ Decomponha os alimentos em 'identifiedItems', inclua dicas de nutrição funcion
 
     const response = await generateContentWithRetry({
       apiKey: customApiKey,
-      contents: [{ role: "user", parts: partsList }],
+      contents: partsList,
       config: {
         systemInstruction: systemInstruction,
         responseMimeType: "application/json",

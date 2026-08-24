@@ -223,14 +223,28 @@ export default function App() {
           const q = query(collection(db, "ai_history"), where("uid", "==", firebaseUser.uid));
           const chatSnap = await getDocs(q);
           if (!chatSnap.empty) {
-            setChatMessages(chatSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Message)));
+            const loaded = chatSnap.docs.map((d) => {
+              const data = d.data() as any;
+              return {
+                id: d.id || Math.random().toString(36).substr(2, 9),
+                sender: data.sender || (data.resposta ? "assistant" : "user"),
+                text: data.text || data.resposta || data.pergunta || "",
+                timestamp: data.timestamp || new Date().toISOString(),
+              } as Message;
+            }).filter(m => m.text && m.text.trim().length > 0);
+            setChatMessages(loaded.length > 0 ? loaded : INITIAL_CHAT_MESSAGES);
           } else {
             setChatMessages(INITIAL_CHAT_MESSAGES);
           }
         } catch (err) {
           console.error("Error loading chat from Firestore:", err);
           const saved = localStorage.getItem("glyco_chat");
-          setChatMessages(saved ? JSON.parse(saved) : INITIAL_CHAT_MESSAGES);
+          try {
+            const parsed = saved ? JSON.parse(saved) : [];
+            setChatMessages(Array.isArray(parsed) && parsed.length > 0 ? parsed : INITIAL_CHAT_MESSAGES);
+          } catch {
+            setChatMessages(INITIAL_CHAT_MESSAGES);
+          }
         }
       } else {
         const savedOffline = localStorage.getItem("glyco_offline_user");
@@ -243,7 +257,13 @@ export default function App() {
           setFoodLogs(localStorage.getItem("glyco_food") ? JSON.parse(localStorage.getItem("glyco_food")!) : []);
           setMedicationLogs(localStorage.getItem("glyco_meds") ? JSON.parse(localStorage.getItem("glyco_meds")!) : []);
           setExerciseLogs(localStorage.getItem("glyco_exercises") ? JSON.parse(localStorage.getItem("glyco_exercises")!) : []);
-          setChatMessages(localStorage.getItem("glyco_chat") ? JSON.parse(localStorage.getItem("glyco_chat")!) : INITIAL_CHAT_MESSAGES);
+          const savedChat = localStorage.getItem("glyco_chat");
+          try {
+            const parsedChat = savedChat ? JSON.parse(savedChat) : [];
+            setChatMessages(Array.isArray(parsedChat) && parsedChat.length > 0 ? parsedChat : INITIAL_CHAT_MESSAGES);
+          } catch {
+            setChatMessages(INITIAL_CHAT_MESSAGES);
+          }
         } else {
           setUser(null);
           setProfile(null);

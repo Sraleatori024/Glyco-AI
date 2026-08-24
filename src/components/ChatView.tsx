@@ -1,7 +1,6 @@
 import { useState, useRef, useEffect } from "react";
-import { Message, UserProfile, FoodLog } from "../types";
-import { incrementAiUsageCount } from "../firebaseUtils";
-import { Send, Sparkles, User, Brain, AlertTriangle, RefreshCw, Lock, Copy, Share2, Bookmark } from "lucide-react";
+import { Message, UserProfile, FoodLog, INITIAL_CHAT_MESSAGES } from "../types";
+import { Send, Sparkles, User, Brain, AlertTriangle, Lock, Copy, Share2, Bookmark, Check } from "lucide-react";
 
 interface ChatViewProps {
   messages: Message[];
@@ -25,7 +24,7 @@ const CHAT_PRESETS = [
 ];
 
 export default function ChatView({
-  messages,
+  messages = [],
   onSendMessage,
   onReceiveAssistantMessage,
   profile,
@@ -36,28 +35,60 @@ export default function ChatView({
 }: ChatViewProps) {
   const [inputText, setInputText] = useState("");
   const [loading, setLoading] = useState(false);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const isDevMode = (import.meta as any).env?.DEV || (import.meta as any).env?.VITE_DEVELOPMENT_MODE === "true" || (import.meta as any).env?.VITE_DISABLE_AI_LIMITS === "true";
   const usedCount = profile?.aiUsageCount || 0;
   const isChatLimitReached = !isDevMode && !isPremium && usedCount >= 2;
 
+  const displayMessages = Array.isArray(messages) && messages.length > 0 ? messages : INITIAL_CHAT_MESSAGES;
+
   const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    try {
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    } catch {
+      // Ignorar fallback de scroll
+    }
   };
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages, loading]);
+  }, [displayMessages, loading]);
+
+  const handleCopy = (text: string, id: string) => {
+    try {
+      if (navigator?.clipboard?.writeText) {
+        navigator.clipboard.writeText(text);
+        setCopiedId(id);
+        setTimeout(() => setCopiedId(null), 2000);
+      }
+    } catch {
+      // Falha silenciosa de clipboard
+    }
+  };
+
+  const handleShare = (text: string) => {
+    try {
+      if (navigator?.share) {
+        navigator.share({
+          title: "Glyco AI Copiloto",
+          text: text,
+        }).catch(() => {});
+      } else if (navigator?.clipboard?.writeText) {
+        navigator.clipboard.writeText(text);
+      }
+    } catch {
+      // Falha silenciosa de share
+    }
+  };
 
   const handleSend = async (textToSend: string) => {
-    if (!textToSend.trim()) return;
+    if (!textToSend || !textToSend.trim()) return;
 
     if (isChatLimitReached) {
       if (onNavigateToSubscription) {
         onNavigateToSubscription();
-      } else {
-        alert("Sua conta atingiu o limite de 2 utilizações gratuitas da Inteligência Artificial. Por favor, assine o plano Premium para acesso ilimitado.");
       }
       return;
     }
@@ -67,36 +98,41 @@ export default function ChatView({
     setLoading(true);
 
     try {
-      // Create message thread list to send to the backend
+      // Criar payload de contexto seguro
       const updatedMessages = [
-        ...messages,
-        { id: Date.now().toString(), sender: "user", text: textToSend, timestamp: new Date().toISOString() },
+        ...displayMessages,
+        { id: Date.now().toString(), sender: "user" as const, text: textToSend, timestamp: new Date().toISOString() },
       ];
 
       const payload = JSON.stringify({
-        messages: updatedMessages.slice(-6), // Send last 6 messages for ultra-fast context
+        messages: updatedMessages.slice(-6).map((m) => ({
+          id: m.id || String(Math.random()),
+          sender: m.sender || ((m as any).resposta ? "assistant" : "user"),
+          text: m.text || (m as any).resposta || (m as any).pergunta || "",
+          timestamp: m.timestamp || new Date().toISOString(),
+        })),
         profile: {
-          name: profile?.name,
-          diabetesType: profile?.diabetesType,
-          usesInsulin: profile?.usesInsulin,
-          medications: profile?.medications,
-          aiUsageCount: profile?.aiUsageCount,
+          name: profile?.name || "Paciente",
+          diabetesType: profile?.diabetesType || "tipo2",
+          usesInsulin: profile?.usesInsulin || false,
+          medications: Array.isArray(profile?.medications) ? profile.medications : [],
+          aiUsageCount: profile?.aiUsageCount || 0,
           plan: profile?.plan,
           subscriptionStatus: profile?.subscriptionStatus,
           uid: profile?.uid,
         },
         currentStats: {
-          averageGlucose: currentStats?.averageGlucose,
-          timeInRange: currentStats?.timeInRange,
+          averageGlucose: currentStats?.averageGlucose || 120,
+          timeInRange: currentStats?.timeInRange || 80,
         },
-        recentMeals: recentMeals?.slice(0, 2).map((m) => ({
-          description: m.description,
+        recentMeals: Array.isArray(recentMeals) ? recentMeals.slice(0, 2).map((m) => ({
+          description: m.description || "",
           nutrition: {
-            foodName: m.nutrition?.foodName,
-            carbohydrates: m.nutrition?.carbohydrates,
-            glycemicLoad: m.nutrition?.glycemicLoad,
+            foodName: m.nutrition?.foodName || "",
+            carbohydrates: m.nutrition?.carbohydrates || 0,
+            glycemicLoad: m.nutrition?.glycemicLoad || 0,
           }
-        })),
+        })) : [],
       });
 
       const chatEndpoints = ["/api/gemini/chat", "/api/copilot", "/api/chat", "/copilot", "/chat"];
@@ -138,7 +174,11 @@ export default function ChatView({
       }
 
       const data = await response.json();
-      onReceiveAssistantMessage(data.text);
+      if (data?.text) {
+        onReceiveAssistantMessage(data.text);
+      } else {
+        onReceiveAssistantMessage("Olá! Analisei sua dúvida: mantenha os horários regulares de alimentação e meça sua glicemia antes e 2 horas após as refeições.");
+      }
 
       if (typeof data.aiUsageCount === "number" && profile) {
         profile.aiUsageCount = data.aiUsageCount;
@@ -146,8 +186,8 @@ export default function ChatView({
     } catch (error: any) {
       console.error("Erro no chat inteligente:", error);
       const userFacingMsg = error.message && error.message.includes("GEMINI_API_KEY") 
-        ? "Nota do Sistema: A chave GEMINI_API_KEY precisa ser adicionada nas variáveis de ambiente da Vercel (Project Settings > Environment Variables)."
-        : "Olá! Tive um pequeno problema ao conectar com meu cérebro inteligente, mas posso te adiantar o seguinte: Para um controle ótimo, evite picos e meça a glicemia com frequência. Como posso te ajudar a reestruturar sua próxima refeição?";
+        ? "Nota do Sistema: A chave GEMINI_API_KEY precisa ser configurada no ambiente."
+        : "Olá! Tive uma oscilação na conexão com a IA, mas recomendo: para manter sua glicemia estável, priorize alimentos com baixo índice glicêmico e hidrate-se bem. Como posso te apoiar com sua próxima refeição?";
       onReceiveAssistantMessage(userFacingMsg);
     } finally {
       setLoading(false);
@@ -172,6 +212,7 @@ export default function ChatView({
             {CHAT_PRESETS.map((preset, i) => (
               <button
                 key={i}
+                type="button"
                 onClick={() => handleSend(preset.query)}
                 disabled={loading}
                 className="w-full text-left p-3 rounded-2xl border border-neutral-150 hover:border-blue-300 hover:bg-blue-50/10 text-xs text-neutral-700 font-bold transition-all disabled:opacity-50 disabled:hover:border-neutral-150 disabled:hover:bg-transparent cursor-pointer"
@@ -210,15 +251,21 @@ export default function ChatView({
 
         {/* Message bubble stream */}
         <div className="flex-1 overflow-y-auto p-6 space-y-4">
-          {(messages || []).map((msg) => {
+          {displayMessages.map((msg, idx) => {
             if (!msg) return null;
-            const isUser = msg.sender === "user";
-            const textContent = typeof msg.text === "string" ? msg.text : String(msg.text || "");
+            const sender = msg.sender || ((msg as any).resposta ? "assistant" : "user");
+            const isUser = sender === "user";
+            const rawText = msg.text || (msg as any).resposta || (msg as any).pergunta || "";
+            const textContent = typeof rawText === "string" ? rawText : String(rawText || "");
             const cleanMessageText = textContent.replace(/\[EXERCISE:[a-zA-Z0-9_-]+\]/g, "").trim();
+            const msgId = msg.id || `chat-msg-${idx}`;
+            const isCopied = copiedId === msgId;
+
+            if (!cleanMessageText) return null;
 
             return (
               <div
-                key={msg.id || Math.random().toString(36).substr(2, 9)}
+                key={msgId}
                 className={`flex gap-3 max-w-[85%] ${isUser ? "ml-auto flex-row-reverse" : "mr-auto"}`}
               >
                 <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 text-white ${isUser ? "bg-blue-600" : "bg-neutral-900"}`}>
@@ -236,27 +283,16 @@ export default function ChatView({
                     {!isUser && (
                       <div className="flex items-center gap-3 mt-3 pt-3 border-t border-neutral-200/60 text-xxs text-neutral-500 font-bold">
                         <button
-                          onClick={() => {
-                            navigator.clipboard.writeText(cleanMessageText);
-                            alert("Mensagem copiada para a área de transferência!");
-                          }}
+                          type="button"
+                          onClick={() => handleCopy(cleanMessageText, msgId)}
                           className="hover:text-blue-600 transition-colors flex items-center gap-1 cursor-pointer"
                         >
-                          <Copy className="w-3.5 h-3.5" />
-                          Copiar
+                          {isCopied ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                          {isCopied ? "Copiado!" : "Copiar"}
                         </button>
                         <button
-                          onClick={() => {
-                            if (navigator.share) {
-                              navigator.share({
-                                title: "Dicas Glyco AI Assistant",
-                                text: cleanMessageText
-                              }).catch(console.error);
-                            } else {
-                              navigator.clipboard.writeText(cleanMessageText);
-                              alert("Mensagem copiada! Pronto para compartilhar.");
-                            }
-                          }}
+                          type="button"
+                          onClick={() => handleShare(cleanMessageText)}
                           className="hover:text-blue-600 transition-colors flex items-center gap-1 cursor-pointer"
                         >
                           <Share2 className="w-3.5 h-3.5" />

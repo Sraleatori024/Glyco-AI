@@ -95,7 +95,11 @@ export default function ChatView({
 
     onSendMessage(textToSend);
     setInputText("");
+    console.log(`[COPILOTO] INÍCIO`);
     setLoading(true);
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout preventivo
 
     try {
       // Criar payload de contexto seguro
@@ -135,44 +139,37 @@ export default function ChatView({
         })) : [],
       });
 
-      const chatEndpoints = ["/api/gemini/chat", "/api/copilot", "/api/chat", "/copilot", "/chat"];
-      let response: Response | null = null;
-      let lastErrorMsg = "Falha ao comunicar com assistente virtual.";
+      console.log(`[COPILOTO] REQUEST ENVIADA (/api/gemini/chat)`);
+      const response = await fetch("/api/gemini/chat", {
+        method: "POST",
+        headers: { 
+          "Content-Type": "application/json",
+          "x-user-uid": profile?.uid || "",
+          "x-user-role": profile?.role || ""
+        },
+        body: payload,
+        signal: controller.signal
+      });
 
-      for (const endpoint of chatEndpoints) {
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        let lastErrorMsg = "Falha ao comunicar com assistente virtual.";
         try {
-          const res = await fetch(endpoint, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: payload,
-          });
-
-          if (res.ok) {
-            response = res;
-            break;
-          } else {
-            try {
-              const errData = await res.json();
-              if (errData.message) lastErrorMsg = errData.message;
-              if (res.status === 403 || errData.code === "TRIAL_EXHAUSTED") {
-                if (profile) profile.aiUsageCount = errData.aiUsageCount || 2;
-                if (onNavigateToSubscription) onNavigateToSubscription();
-                throw new Error(errData.message || "Sua conta atingiu o limite de 2 utilizações gratuitas da Inteligência Artificial.");
-              }
-            } catch (jsonErr: any) {
-              if (jsonErr.message && jsonErr.message.includes("2 utilizações")) throw jsonErr;
-            }
+          const errData = await response.json();
+          if (errData.message) lastErrorMsg = errData.message;
+          if (response.status === 403 || errData.code === "TRIAL_EXHAUSTED") {
+            if (profile) profile.aiUsageCount = errData.aiUsageCount || 2;
+            if (onNavigateToSubscription) onNavigateToSubscription();
+            throw new Error(errData.message || "Sua conta atingiu o limite de 2 utilizações gratuitas da Inteligência Artificial.");
           }
-        } catch (err: any) {
-          if (err.message && err.message.includes("2 utilizações")) throw err;
-          console.warn(`[CHAT RETRY] Falha no endpoint ${endpoint}:`, err);
+        } catch (jsonErr: any) {
+          if (jsonErr.message && jsonErr.message.includes("2 utilizações")) throw jsonErr;
         }
-      }
-
-      if (!response || !response.ok) {
         throw new Error(lastErrorMsg);
       }
 
+      console.log(`[COPILOTO] FRONTEND RECEBEU`);
       const data = await response.json();
       if (data?.text) {
         onReceiveAssistantMessage(data.text);
@@ -184,12 +181,17 @@ export default function ChatView({
         profile.aiUsageCount = data.aiUsageCount;
       }
     } catch (error: any) {
-      console.error("Erro no chat inteligente:", error);
-      const userFacingMsg = error.message && error.message.includes("GEMINI_API_KEY") 
+      clearTimeout(timeoutId);
+      const isAbort = error.name === "AbortError";
+      console.error("[COPILOTO] Erro no chat inteligente:", error);
+      const userFacingMsg = isAbort
+        ? "O assistente demorou para responder. Por favor, envie sua dúvida novamente."
+        : error.message && error.message.includes("GEMINI_API_KEY") 
         ? "Nota do Sistema: A chave GEMINI_API_KEY precisa ser configurada no ambiente."
-        : "Olá! Tive uma oscilação na conexão com a IA, mas recomendo: para manter sua glicemia estável, priorize alimentos com baixo índice glicêmico e hidrate-se bem. Como posso te apoiar com sua próxima refeição?";
+        : "Olá! Tive uma oscilação momentânea na conexão com a IA, mas recomendo: para manter sua glicemia estável, priorize alimentos com baixo índice glicêmico e hidrate-se bem. Como posso te apoiar com sua próxima refeição?";
       onReceiveAssistantMessage(userFacingMsg);
     } finally {
+      console.log(`[COPILOTO] FINALIZADO`);
       setLoading(false);
     }
   };

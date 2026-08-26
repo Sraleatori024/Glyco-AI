@@ -268,10 +268,14 @@ export default function AlimentacaoView({
       return;
     }
 
+    console.log(`[ALIMENTAÇÃO] INÍCIO`);
     setAnalysisError(null);
     setAnalysisResult(null);
     setIsEditingResult(false);
     setAnalyzing(true);
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 20000); // 20s timeout preventivo
 
     try {
       const payload = JSON.stringify({
@@ -281,69 +285,39 @@ export default function AlimentacaoView({
         email: userEmail
       });
 
-      const foodEndpoints = [
-        "/api/gemini/analyze-food",
-        "/api/analyze-food",
-        "/api/analyze-food-photo",
-        "/analyze-food-photo",
-        "/analyze-food"
-      ];
+      console.log(`[ALIMENTAÇÃO] REQUEST ENVIADA (/api/gemini/analyze-food)`);
+      const response = await fetch("/api/gemini/analyze-food", {
+        method: "POST",
+        headers: { 
+          "Content-Type": "application/json",
+          "x-user-email": userEmail,
+          "x-user-uid": profile?.uid || "",
+          "x-user-role": profile?.role || ""
+        },
+        body: payload,
+        signal: controller.signal
+      });
 
-      let response: Response | null = null;
-      let parsedErrorData: any = null;
-      let lastStatusCode = 500;
+      clearTimeout(timeoutId);
 
-      for (const endpoint of foodEndpoints) {
+      if (!response.ok) {
+        let parsedErrorData: any = null;
         try {
-          console.log(`[ETAPA 2: API] Enviando requisição POST para ${endpoint}...`);
-          const res = await fetch(endpoint, {
-            method: "POST",
-            headers: { 
-              "Content-Type": "application/json",
-              "x-user-email": userEmail,
-              "x-user-uid": profile?.uid || "",
-              "x-user-role": profile?.role || ""
-            },
-            body: payload,
-          });
-
-          if (res.ok) {
-            console.log(`[ETAPA 2: API] Resposta HTTP ${res.status} recebida de ${endpoint}.`);
-            response = res;
-            break;
-          } else {
-            lastStatusCode = res.status;
-            try {
-              parsedErrorData = await res.json();
-            } catch (_) {
-              try {
-                const txt = await res.text();
-                parsedErrorData = { message: txt, error: "HTTP_ERROR" };
-              } catch (_) {}
-            }
-
-            console.warn(`[ETAPA 2: API] Endpoint ${endpoint} retornou status ${res.status}:`, parsedErrorData);
-
-            if (res.status === 403 || parsedErrorData?.code === "TRIAL_EXHAUSTED" || parsedErrorData?.error === "TRIAL_EXHAUSTED") {
-              console.warn(`[ETAPA 4: QUOTA] Cota excedida no servidor (403 Forbidden).`);
-              setShowPremiumPrompt(true);
-              if (profile) profile.aiUsageCount = parsedErrorData?.aiUsageCount || 2;
-              break;
-            }
-          }
-        } catch (err: any) {
-          console.warn(`[ETAPA 2: API] Falha de rede no endpoint ${endpoint}:`, err);
+          parsedErrorData = await response.json();
+        } catch (_) {
+          try {
+            const txt = await response.text();
+            parsedErrorData = { message: txt, error: "HTTP_ERROR" };
+          } catch (_) {}
         }
-      }
 
-      if (!response || !response.ok) {
         const step = parsedErrorData?.step || "2. API";
         const errorName = parsedErrorData?.error || "FALHA_NA_COMUNICACAO";
-        const statusCode = parsedErrorData?.statusCode || lastStatusCode;
+        const statusCode = response.status;
         const origMsg = parsedErrorData?.message || parsedErrorData?.originalError || "Falha ao processar análise da refeição.";
         const probCause = parsedErrorData?.probableCause || (
           statusCode === 404 
-            ? "O endpoint de backend não foi encontrado. Verifique se as rotas /api estão configuradas no Vercel/Express."
+            ? "O endpoint de backend não foi encontrado. Verifique se as rotas /api estão configuradas."
             : statusCode === 500 
             ? "Erro interno no servidor. Verifique a chave GEMINI_API_KEY no painel de ambiente." 
             : "Falha de rede ou instabilidade temporária na API."
@@ -362,6 +336,7 @@ export default function AlimentacaoView({
 
         if (statusCode === 403 && (errorName === "TRIAL_EXHAUSTED" || parsedErrorData?.code === "TRIAL_EXHAUSTED")) {
           setShowPremiumPrompt(true);
+          if (profile) profile.aiUsageCount = parsedErrorData?.aiUsageCount || 2;
         } else {
           setAnalysisError({
             step,
@@ -377,7 +352,7 @@ export default function AlimentacaoView({
         return;
       }
 
-      // Parsing Successful Result
+      console.log(`[ALIMENTAÇÃO] FRONTEND RECEBEU`);
       const result = await response.json();
       console.log(
         `%c[SUCESSO NA ANÁLISE DE REFEIÇÃO]\n` +
@@ -394,27 +369,31 @@ export default function AlimentacaoView({
         profile.aiUsageCount = result.aiUsageCount;
       }
     } catch (error: any) {
+      clearTimeout(timeoutId);
+      const isAbort = error.name === "AbortError";
+      const errMsg = isAbort ? "A requisição excedeu o tempo limite (20s). Tente novamente." : (error.message || String(error));
+
       console.error(
         `%c[ERRO NA ANÁLISE DE REFEIÇÃO]\n` +
         `• ETAPA DO ERRO: 2. API\n` +
-        `• NOME DO ERRO: CLIENT_NETWORK_EXCEPTION\n` +
-        `• CÓDIGO HTTP: 0 (Sem Conexão)\n` +
-        `• MENSAGEM ORIGINAL: ${error.message || String(error)}\n` +
-        `• CAUSA PROVÁVEL: Falha de conexão entre o navegador e o servidor backend. Verifique sua rede.`,
+        `• NOME DO ERRO: ${isAbort ? "CLIENT_TIMEOUT" : "CLIENT_NETWORK_EXCEPTION"}\n` +
+        `• CÓDIGO HTTP: 0\n` +
+        `• MENSAGEM: ${errMsg}`,
         "color: #ef4444; font-weight: bold; font-size: 13px;"
       );
 
       setAnalysisError({
         step: "2. API",
-        errorName: "CLIENT_NETWORK_EXCEPTION",
+        errorName: isAbort ? "CLIENT_TIMEOUT" : "CLIENT_NETWORK_EXCEPTION",
         statusCode: 0,
-        message: error.message || "Não foi possível conectar ao servidor backend da aplicação.",
+        message: errMsg,
         originalMessage: String(error),
-        probableCause: "O navegador não conseguiu estabelecer conexão HTTP com o servidor da aplicação ou a requisição sofreu timeout.",
+        probableCause: isAbort ? "O servidor demorou mais de 20s para responder." : "Falha na conexão com o servidor.",
         source: "Rede / Conexão do Cliente",
         details: String(error)
       });
     } finally {
+      console.log(`[ALIMENTAÇÃO] FINALIZADO`);
       setAnalyzing(false);
     }
   };

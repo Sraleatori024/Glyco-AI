@@ -237,7 +237,8 @@ async function generateContentWithRetry(params: {
   apiKey?: string;
 }) {
   const ai = getGeminiClient(params.apiKey);
-  const modelsToTry = ["gemini-2.5-flash", "gemini-flash-latest", "gemini-2.5-pro"];
+  // Modelos suportados e confirmados no SDK @google/genai com alta disponibilidade
+  const modelsToTry = ["gemini-3.1-flash-lite", "gemini-flash-latest", "gemini-3.7-flash"];
   let lastError: any = null;
 
   for (const modelName of modelsToTry) {
@@ -445,8 +446,7 @@ apiRouter.post(["/gemini/chat", "/chat", "/copilot", "/api/gemini/chat", "/api/c
   let reservedSlot = false;
   let targetUid: string | undefined = undefined;
 
-  console.log(`\n--- [INÍCIO /api/gemini/chat / copilot] ---`);
-  console.log(`[CLIENTE]: ${req.headers["user-agent"] || "mobile"}`);
+  console.log(`[COPILOTO] API RECEBEU: /api/gemini/chat`);
 
   try {
     const customApiKey = req.headers["x-gemini-api-key"] || req.body?.apiKey;
@@ -461,7 +461,7 @@ apiRouter.post(["/gemini/chat", "/chat", "/copilot", "/api/gemini/chat", "/api/c
     // 1. Server-Side AI Quota Verification & Atomic Reservation
     const limitCheck = await reserveAiSlot(uid, profile);
     if (!limitCheck.allowed) {
-      console.warn(`[AI LIMIT BLOCKED /chat]: Usuário ${uid || "desconhecido"} bloqueado no servidor. Limite atingido.`);
+      console.warn(`[COPILOTO] Quota atingida para o usuário ${uid || "desconhecido"}.`);
       return res.status(403).json({
         error: "TRIAL_EXHAUSTED",
         code: "TRIAL_EXHAUSTED",
@@ -497,11 +497,27 @@ DIRETRIZES OBRIGATÓRIAS DE RESPOSTA:
 
     const fullInstruction = `${systemInstruction}\n\nContexto Atual: ${contextData}`;
 
-    // Send only the most relevant recent messages (last 6) to keep prompt lightweight and blazing fast
-    const chatContents = messages.slice(-6).map((msg: any) => ({
-      role: msg.sender === "user" ? "user" : "model",
-      parts: [{ text: msg.text }]
+    // Montar histórico garantindo que a primeira mensagem seja 'user' e tenha texto válido
+    const validRawMessages = messages.filter((m: any) => (m.text || m.resposta || m.pergunta || "").trim().length > 0);
+    const mappedMessages = validRawMessages.slice(-6).map((msg: any) => ({
+      role: (msg.sender === "user" || !msg.sender) ? "user" : "model",
+      parts: [{ text: msg.text || msg.resposta || msg.pergunta || "" }]
     }));
+
+    // Localizar a primeira mensagem com role "user" para respeitar a exigência do Gemini
+    const firstUserIdx = mappedMessages.findIndex((m: any) => m.role === "user");
+    const chatContents = firstUserIdx >= 0 ? mappedMessages.slice(firstUserIdx) : mappedMessages;
+
+    // Se ainda estiver vazio ou não começar com user, injetar a última mensagem do usuário
+    if (chatContents.length === 0 || chatContents[0].role !== "user") {
+      const lastUserMsg = validRawMessages.filter((m: any) => m.sender === "user").pop();
+      chatContents.unshift({
+        role: "user",
+        parts: [{ text: lastUserMsg?.text || "Como controlar minha glicemia pós-prandial?" }]
+      });
+    }
+
+    console.log(`[COPILOTO] GEMINI INICIOU (${chatContents.length} msgs)...`);
 
     const response = await generateContentWithRetry({
       apiKey: customApiKey,
@@ -513,13 +529,15 @@ DIRETRIZES OBRIGATÓRIAS DE RESPOSTA:
       }
     });
 
-    console.log(`[FIM SUCESSO chat]: Resposta gerada em ${Date.now() - startTime}ms`);
+    console.log(`[COPILOTO] GEMINI RESPONDEU em ${Date.now() - startTime}ms`);
+    console.log(`[COPILOTO] RESPONSE ENVIADA`);
+
     res.json({
       text: response.text,
       aiUsageCount: limitCheck.currentUsage
     });
   } catch (error: any) {
-    console.error("[ERRO chat]:", error.message || error);
+    console.error("[COPILOTO] ERRO:", error.message || error);
     if (reservedSlot && targetUid) {
       await rollbackAiSlot(targetUid);
     }
@@ -656,10 +674,7 @@ apiRouter.post(["/gemini/analyze-food", "/analyze-food", "/analyze-food-photo", 
   let reservedSlot = false;
   let targetUid: string | undefined = undefined;
 
-  console.log(`\n===========================================================`);
-  console.log(`[ETAPA 2: API] Requisição recebida em /api/gemini/analyze-food`);
-  console.log(`[CLIENTE]: ${req.headers["user-agent"] || "mobile"}`);
-  console.log(`===========================================================`);
+  console.log(`[ALIMENTAÇÃO] API RECEBEU: /api/gemini/analyze-food`);
 
   try {
     const customApiKey = req.headers["x-gemini-api-key"] || req.body?.apiKey;
@@ -819,7 +834,7 @@ Decomponha os alimentos em 'identifiedItems', inclua dicas de nutrição funcion
 
     partsList.push({ text: promptText });
 
-    console.log(`[ETAPA 5: GEMINI] Disparando requisição para a API do Gemini...`);
+    console.log(`[ALIMENTAÇÃO] GEMINI INICIOU`);
 
     const response = await generateContentWithRetry({
       apiKey: customApiKey,
@@ -886,8 +901,8 @@ Decomponha os alimentos em 'identifiedItems', inclua dicas de nutrição funcion
     const duration = Date.now() - startTime;
     const resultText = response.text || "{}";
 
-    // ETAPA 6: Resposta
-    console.log(`[ETAPA 6: RESPOSTA] Processando resposta JSON do Gemini (${duration}ms)...`);
+    console.log(`[ALIMENTAÇÃO] GEMINI RESPONDEU em ${duration}ms`);
+    console.log(`[ALIMENTAÇÃO] RESPONSE ENVIADA`);
     let parsedResult: any = {};
     try {
       parsedResult = JSON.parse(resultText);

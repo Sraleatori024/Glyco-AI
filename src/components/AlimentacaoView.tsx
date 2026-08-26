@@ -21,7 +21,9 @@ import {
   Layers, 
   Activity, 
   Lightbulb,
-  Check
+  Check,
+  ChevronDown,
+  ChevronUp
 } from "lucide-react";
 
 interface AlimentacaoViewProps {
@@ -60,6 +62,8 @@ export default function AlimentacaoView({
   const [base64Image, setBase64Image] = useState<string | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState<FoodNutrition | null>(null);
+  const [showTipsExpanded, setShowTipsExpanded] = useState(false);
+  const [showExplanationExpanded, setShowExplanationExpanded] = useState(false);
   const [isEditingResult, setIsEditingResult] = useState(false);
   const [analysisError, setAnalysisError] = useState<DiagnosticError | null>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -1221,29 +1225,81 @@ export default function AlimentacaoView({
                 )}
 
                 {analysisResult.functionalTips && analysisResult.functionalTips.length > 0 && (
-                  <div className="bg-amber-50/70 p-4 rounded-2xl border border-amber-100 space-y-2">
-                    <h4 className="text-xs font-bold text-amber-900 uppercase tracking-wider flex items-center gap-1.5">
-                      <Sparkles className="w-4 h-4 text-amber-600" />
-                      Dicas Funcionais & Substituições:
-                    </h4>
-                    <ul className="text-xs text-amber-800 space-y-1 pl-4 list-disc">
-                      {analysisResult.functionalTips.map((tip, idx) => (
-                        <li key={idx}>{tip}</li>
-                      ))}
-                    </ul>
+                  <div className="bg-amber-50/70 rounded-2xl border border-amber-100 overflow-hidden transition-all">
+                    <button
+                      type="button"
+                      id="toggle-functional-tips-btn"
+                      onClick={() => setShowTipsExpanded(!showTipsExpanded)}
+                      className="w-full p-4 flex items-center justify-between gap-3 text-left cursor-pointer hover:bg-amber-100/40 transition-colors"
+                      aria-expanded={showTipsExpanded}
+                    >
+                      <h4 className="text-xs font-bold text-amber-900 uppercase tracking-wider flex items-center gap-1.5">
+                        <Sparkles className="w-4 h-4 text-amber-600 shrink-0" />
+                        Dicas Funcionais & Substituições
+                      </h4>
+                      <span className="flex items-center gap-1 text-xs font-bold text-amber-700 hover:text-amber-900 shrink-0 select-none">
+                        {showTipsExpanded ? (
+                          <>
+                            <ChevronUp className="w-3.5 h-3.5" />
+                            Ver menos
+                          </>
+                        ) : (
+                          <>
+                            <ChevronDown className="w-3.5 h-3.5" />
+                            Ver mais
+                          </>
+                        )}
+                      </span>
+                    </button>
+                    {showTipsExpanded && (
+                      <div className="px-4 pb-4 pt-1 border-t border-amber-100/80">
+                        <ul className="text-xs text-amber-900 space-y-1.5 pl-4 list-disc leading-relaxed">
+                          {analysisResult.functionalTips.map((tip, idx) => (
+                            <li key={idx}>{tip}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
                   </div>
                 )}
 
                 {/* Explanations */}
-                <div className="bg-blue-50/50 p-4 rounded-2xl border border-blue-100">
-                  <h4 className="text-xs font-bold text-blue-900 uppercase tracking-wider mb-1 flex items-center gap-1">
-                    <Info className="w-4 h-4 text-blue-600" />
-                    Avaliação do Especialista Virtual:
-                  </h4>
-                  <p className="text-xs text-blue-800 leading-relaxed">
-                    {analysisResult.explanation}
-                  </p>
-                </div>
+                {analysisResult.explanation && (
+                  <div className="bg-blue-50/50 rounded-2xl border border-blue-100 overflow-hidden transition-all">
+                    <button
+                      type="button"
+                      id="toggle-expert-evaluation-btn"
+                      onClick={() => setShowExplanationExpanded(!showExplanationExpanded)}
+                      className="w-full p-4 flex items-center justify-between gap-3 text-left cursor-pointer hover:bg-blue-100/40 transition-colors"
+                      aria-expanded={showExplanationExpanded}
+                    >
+                      <h4 className="text-xs font-bold text-blue-900 uppercase tracking-wider flex items-center gap-1.5">
+                        <Info className="w-4 h-4 text-blue-600 shrink-0" />
+                        Avaliação do Especialista Virtual
+                      </h4>
+                      <span className="flex items-center gap-1 text-xs font-bold text-blue-700 hover:text-blue-900 shrink-0 select-none">
+                        {showExplanationExpanded ? (
+                          <>
+                            <ChevronUp className="w-3.5 h-3.5" />
+                            Ver menos
+                          </>
+                        ) : (
+                          <>
+                            <ChevronDown className="w-3.5 h-3.5" />
+                            Ver mais
+                          </>
+                        )}
+                      </span>
+                    </button>
+                    {showExplanationExpanded && (
+                      <div className="px-4 pb-4 pt-1 border-t border-blue-100/80">
+                        <p className="text-xs text-blue-900 leading-relaxed">
+                          {analysisResult.explanation}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                )}
               </motion.div>
             ) : null}
           </AnimatePresence>
